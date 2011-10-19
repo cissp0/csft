@@ -3,6 +3,8 @@ dnl Process this file with autoconf to produce a configure script.
 AC_PREREQ(2.59)
 AC_INIT([sphinx], [1.11], [shodan(at)shodan.ru])
 
+m4_include([python.m4])
+
 dnl --------------------------------------------------------------------------
 
 SPHINX_CONFIGURE_PART([checking build environment])
@@ -10,6 +12,7 @@ SPHINX_CONFIGURE_PART([checking build environment])
 AC_CONFIG_AUX_DIR([config])
 AM_INIT_AUTOMAKE([-Wall -Werror foreign])
 AM_MAINTAINER_MODE
+AM_PATH_PYTHON
 AC_CONFIG_SRCDIR([src/searchd.cpp])
 AC_CONFIG_HEADER([config/config.h])
 
@@ -56,6 +59,9 @@ fi
 AC_PROG_CC
 AC_PROG_CXX
 AC_PROG_RANLIB
+
+dnl Checks for embedded interpretors.
+INN_ARG_PYTHON
 
 AC_COMPILE_IFELSE([
 #ifdef __GNUC__
@@ -305,13 +311,18 @@ else
 fi
 AM_CONDITIONAL(USE_PGSQL, test x$ac_cv_use_pgsql != xno)
 
+dnl ---
 # add macports include directory
 if (echo $MYSQL_LIBS | grep -q -- -L/opt/local/lib); then
    MYSQL_CFLAGS="$MYSQL_CFLAGS -I/opt/local/include"
 fi
 
 # we can now set preprocessor flags for both C and C++ compilers
-CPPFLAGS="$CPPFLAGS $MYSQL_CFLAGS $PGSQL_CFLAGS"
+CPPFLAGS="$CPPFLAGS $MYSQL_CFLAGS $PGSQL_CFLAGS "
+
+AM_CONDITIONAL(USE_PYTHON, test x"$USE_PYTHON" = xDO)
+CPPFLAGS="$CPPFLAGS $PYTHON_CPPFLAGS"
+LIBS="$LIBS $PYTHON_LIBS"
 
 dnl ---
 
