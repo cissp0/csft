@@ -1,2 +1,3 @@
 t/cs_fix
 t/cs_mmseg
+t/cs_pysource
