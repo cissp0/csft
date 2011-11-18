@@ -22,6 +22,8 @@
 #include <errno.h>
 #include <signal.h>
 
+#include "py_layer.h"
+
 #if USE_WINDOWS
 	#define snprintf	_snprintf
 
@@ -58,6 +60,8 @@ char			g_sMinidump[256];
 #define			ROTATE_MIN_INTERVAL 100000 // rotate interval 100 ms
 
 /////////////////////////////////////////////////////////////////////////////
+/*
+// -- this block moved to sphinxutils.h  -coreseek -pysource
 
 template < typename T > struct CSphMTFHashEntry
 {
@@ -166,7 +170,7 @@ protected:
 
 #define HASH_FOREACH(_it,_hash) \
 	for ( _it=_hash.FindFirst(); _it; _it=_hash.FindNext(_it) )
-
+*/
 /////////////////////////////////////////////////////////////////////////////
 
 struct Word_t
@@ -810,6 +814,11 @@ CSphSource * SpawnSource ( const CSphConfigSection & hSource, const char * sSour
 	#if USE_MYSQL
 	if ( hSource["type"]=="mysql" )
 		return SpawnSourceMySQL ( hSource, sSourceName );
+	#endif
+
+	#if USE_PYTHON
+		if ( hSource["type"]=="python")
+			return SpawnSourcePython ( hSource, sSourceName );
 	#endif
 
 	#if USE_ODBC
@@ -1623,7 +1632,7 @@ int main ( int argc, char ** argv )
 				"\n"
 				"Options are:\n"
 				"--config <file>\t\tread configuration from specified file\n"
-				"\t\t\t(default is sphinx.conf)\n"
+				"\t\t\t(default is csft.conf)\n"
 				"--all\t\t\treindex all configured indexes\n"
 				"--quiet\t\t\tbe quiet, only print errors\n"
 				"--verbose\t\tverbose indexing issues report\n"
@@ -1651,8 +1660,8 @@ int main ( int argc, char ** argv )
 				"--print-queries\t\tprint SQL queries (for debugging)\n"
 				"\n"
 				"Examples:\n"
-				"indexer --quiet myidx1\treindex 'myidx1' defined in 'sphinx.conf'\n"
-				"indexer --all\t\treindex all indexes defined in 'sphinx.conf'\n" );
+				"indexer --quiet myidx1\treindex 'myidx1' defined in 'csft.conf'\n"
+				"indexer --all\t\treindex all indexes defined in 'csft.conf'\n" );
 		}
 
 		return 1;
@@ -1737,6 +1746,20 @@ int main ( int argc, char ** argv )
 		break;
 	}
 
+ 	/////////////////////
+	// init python layer
+	////////////////////
+	if ( hConf("python") && hConf["python"]("python") )
+	{
+#if USE_PYTHON
+		CSphConfigSection & hPython = hConf["python"]["python"];
+		if(!cftInitialize(hPython)) 
+			sphDie ( "Python layer's initiation failed.");
+#else
+		sphDie ( "Python layer defined, but indexer does Not supports python. used --enbale-python to recompile.");
+#endif
+	}
+
 	/////////////////////
 	// index each index
 	////////////////////
@@ -1816,6 +1839,10 @@ int main ( int argc, char ** argv )
 
 #if SPH_DEBUG_LEAKS
 	sphAllocsStats ();
+#endif
+
+#if USE_PYTHON
+	cftShutdown(); //clean up 
 #endif
 
 	return bIndexedOk ? 0 : 1;

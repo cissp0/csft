@@ -31,6 +31,8 @@
 #include <limits.h>
 #include <locale.h>
 
+#include "py_layer.h"
+
 #define SEARCHD_BACKLOG			5
 #define SPHINXAPI_PORT			9312
 #define SPHINXQL_PORT			9306
@@ -1350,6 +1352,11 @@ void Shutdown ()
 		sphRTDone();
 
 		sphShutdownWordforms ();
+
+#if USE_PYTHON
+		cftShutdown(); //clean up
+#endif
+
 	}
 
 	ARRAY_FOREACH ( i, g_dListeners )
@@ -6859,12 +6866,13 @@ void SearchHandler_c::RunSubset ( int iStart, int iEnd )
 		{
 			// search through specified local indexes
 			ParseIndexList ( tFirst.m_sIndexes, m_dLocal );
-
+			//CSphVector<CSphString>			m_dLocal;		///< local indexes for the current subset
 			// there should be no distributed indexes in multi-index query
 			int iDistFound = -1;
 			g_tDistLock.Lock();
 
 			ARRAY_FOREACH ( i, m_dLocal )
+				//
 				if ( g_hDistIndexes.Exists ( m_dLocal[i].m_sName ) )
 				{
 					iDistFound = i;
@@ -14027,7 +14035,7 @@ void ShowHelp ()
 		"Options are:\n"
 		"-h, --help\t\tdisplay this help message\n"
 		"-c, -config <file>\tread configuration from specified file\n"
-		"\t\t\t(default is sphinx.conf)\n"
+		"\t\t\t(default is csft.conf)\n"
 		"--stop\t\t\tsend SIGTERM to currently running searchd\n"
 		"--stopwait\t\tsend SIGTERM and wait until actual exit\n"
 		"--status\t\tget ant print status variables\n"
@@ -14054,9 +14062,9 @@ void ShowHelp ()
 #endif
 		"\n"
 		"Examples:\n"
-		"searchd --config /usr/local/sphinx/etc/sphinx.conf\n"
+		"searchd --config /usr/local/sphinx/etc/csft.conf\n"
 #if USE_WINDOWS
-		"searchd --install --config c:\\sphinx\\sphinx.conf\n"
+		"searchd --install --config c:\\sphinx\\csft.conf\n"
 #endif
 		);
 }
@@ -15157,12 +15165,12 @@ int WINAPI ServiceMain ( int argc, char **argv )
 	while ( !g_sConfigFile.cstr() )
 	{
 #ifdef SYSCONFDIR
-		g_sConfigFile = SYSCONFDIR "/sphinx.conf";
+		g_sConfigFile = SYSCONFDIR "/csft.conf";
 		if ( sphIsReadable ( g_sConfigFile.cstr () ) )
 			break;
 #endif
 
-		g_sConfigFile = "./sphinx.conf";
+		g_sConfigFile = "./csft.conf";
 		if ( sphIsReadable ( g_sConfigFile.cstr () ) )
 			break;
 
@@ -15173,9 +15181,9 @@ int WINAPI ServiceMain ( int argc, char **argv )
 	if ( !g_sConfigFile.cstr () )
 		sphFatal ( "no readable config file (looked in "
 #ifdef SYSCONFDIR
-			SYSCONFDIR "/sphinx.conf, "
+			SYSCONFDIR "/csft.conf, "
 #endif
-			"./sphinx.conf)." );
+			"./csft.conf)." );
 
 	sphInfo ( "using config file '%s'...", g_sConfigFile.cstr () );
 
@@ -15192,6 +15200,20 @@ int WINAPI ServiceMain ( int argc, char **argv )
 		sphFatal ( "'searchd' config section not found in '%s'", g_sConfigFile.cstr () );
 
 	const CSphConfigSection & hSearchdpre = hConf["searchd"]["searchd"];
+
+	/////////////////////
+	// init python layer
+	////////////////////
+	if ( hConf("python") && hConf["python"]("python") )
+	{
+		CSphConfigSection & hPython = hConf["python"]["python"];
+#if USE_PYTHON
+		if(!cftInitialize(hPython)) 
+			sphDie ( "Python layer's initiation failed.");
+#else
+		sphDie ( "Python layer defined, but search does Not supports python. used --enbale-python to recompile.");
+#endif
+	}	
 
 	////////////////////////
 	// stop running searchd

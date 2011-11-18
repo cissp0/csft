@@ -5382,14 +5382,95 @@ bool CSphSchema::CompareTo ( const CSphSchema & rhs, CSphString & sError ) const
 	return true;
 }
 
+class SchemaRecord {
+public:
+	CSphString key;
+	int idx;
+};
+
+bool Cmp(const SchemaRecord &p1, const SchemaRecord &p2)
+{
+	char i = 0;
+	while(1) {
+		unsigned char pu1 = p1.key.cstr()[i];
+		unsigned char pu2 = p2.key.cstr()[i];
+		if(pu1 == pu2) {
+			if(pu1 == 0)
+				break;
+			i++;
+		}else{
+			return pu1 < pu2;
+		}
+	}
+	return true;
+}
+
+int CSphSchema::BuildFieldIndexCache()
+{
+	int iRet = 0;
+	//m_field_cache.clear();
+	if(!m_pfield_cache)
+		m_pfield_cache = new SphDarts::DoubleArray();
+	
+	if(m_pfield_cache->array() == NULL)
+	{
+		std::vector< SchemaRecord > items;
+		ARRAY_FOREACH ( i, m_dFields ) {
+			SchemaRecord sr;
+			sr.key = m_dFields[i].m_sName;
+			sr.idx = i;
+			items.push_back(sr);
+
+#if USE_PYTHON_CASE_SENSIVE_ATTR
+			SchemaRecord srE;
+			if(m_dFields[i].m_sNameExactly != m_dFields[i].m_sName)
+			{
+				srE.key = m_dFields[i].m_sNameExactly;
+				srE.idx = i;
+				items.push_back(srE);
+			}
+#endif
+		}
+		std::sort(items.begin(), items.end(), Cmp);
+
+		std::vector <SphDarts::DoubleArray::key_type *> key;
+		std::vector <SphDarts::DoubleArray::value_type> value;
+		for( std::vector<SchemaRecord>::iterator it = items.begin();
+			it != items.end(); it++) {
+				char* ptr = (char*)it->key.cstr();
+				key.push_back(ptr);
+				value.push_back(it->idx);
+		}
+		iRet = m_pfield_cache->build(key.size(), &key[0], 0, &value[0] ) ;
+	}
+	return iRet;
+}
 
 int CSphSchema::GetFieldIndex ( const char * sName ) const
 {
 	if ( !sName )
 		return -1;
-	ARRAY_FOREACH ( i, m_dFields )
+	//check in cache.
+	if(m_pfield_cache && m_pfield_cache->array() != NULL)
+	{
+		//needs to build?
+		
+		SphDarts::DoubleArray::result_pair_type  rs;
+		m_pfield_cache->exactMatchSearch(sName,rs);
+		if(rs.pos) {
+			//printf("cache hit! [%s]:%d.", sName, rs.value);
+			return rs.value; 
+		}
+	}
+
+	ARRAY_FOREACH ( i, m_dFields ) {
 		if ( strcasecmp ( m_dFields[i].m_sName.cstr(), sName )==0 )
 			return i;
+#if USE_PYTHON_CASE_SENSIVE_ATTR
+		if ( strcasecmp ( m_dFields[i].m_sNameExactly.cstr(), sName )==0 )
+			return i;
+#endif
+	}
 	return -1;
 }
 
@@ -5398,9 +5479,16 @@ int CSphSchema::GetAttrIndex ( const char * sName ) const
 {
 	if ( !sName )
 		return -1;
-	ARRAY_FOREACH ( i, m_dAttrs )
+	ARRAY_FOREACH ( i, m_dAttrs ) {
 		if ( m_dAttrs[i].m_sName==sName )
 			return i;
+
+#if USE_PYTHON_CASE_SENSIVE_ATTR
+		if ( m_dAttrs[i].m_sNameExactly==sName )
+			return i;
+#endif
+
+	}
 	return -1;
 }
 
@@ -5416,6 +5504,8 @@ const CSphColumnInfo * CSphSchema::GetAttr ( const char * sName ) const
 
 void CSphSchema::Reset ()
 {
+	if(m_pfield_cache)
+		m_pfield_cache->clear();
 	m_dFields.Reset();
 	ResetAttrs ();
 }
@@ -8354,6 +8444,13 @@ static void ReadSchemaColumn ( CSphReader & rdInfo, CSphColumnInfo & tCol, DWORD
 		tCol.m_sName = "@emptyname";
 
 	tCol.m_sName.ToLower ();
+
+#if USE_PYTHON_CASE_SENSIVE_ATTR
+  	tCol.m_sNameExactly = rdInfo.GetString ();
+  	if ( tCol.m_sNameExactly.IsEmpty () )
+  		tCol.m_sNameExactly = "@emptyname";
+#endif
+
 	tCol.m_eAttrType = (ESphAttr) rdInfo.GetDword (); // FIXME? check/fixup?
 
 	if ( uVersion>=5 ) // m_uVersion for searching
@@ -8398,6 +8495,22 @@ static void WriteSchemaColumn ( CSphWriter & fdInfo, const CSphColumnInfo & tCol
 	int iLen = strlen ( tCol.m_sName.cstr() );
 	fdInfo.PutDword ( iLen );
 	fdInfo.PutBytes ( tCol.m_sName.cstr(), iLen );
+
+#if USE_PYTHON_CASE_SENSIVE_ATTR	
+ 	//coreseek python source only, used to make py source case sentive
+ 	if(tCol.m_sNameExactly.IsEmpty())
+ 	{
+		// if not have m_sNameExactly, write m_sName as m_sNameExactly
+ 		iLen = strlen ( tCol.m_sName.cstr() );
+ 		fdInfo.PutDword ( iLen );
+ 		fdInfo.PutBytes ( tCol.m_sName.cstr(), iLen );
+ 	}else{
+ 		iLen = strlen ( tCol.m_sNameExactly.cstr() );
+ 		fdInfo.PutDword ( iLen );
+ 		fdInfo.PutBytes ( tCol.m_sNameExactly.cstr(), iLen );
+ 	}
+#endif
+
 
 	ESphAttr eAttrType = tCol.m_eAttrType;
 	if ( eAttrType==SPH_ATTR_WORDCOUNT )
@@ -10065,7 +10178,7 @@ int CSphIndex_VLN::Build ( const CSphVector<CSphSource*> & dSources, int iMemory
 			// ensure docid is sane
 			if ( pSource->m_tDocInfo.m_iDocID==DOCID_MAX )
 			{
-				m_sLastError.SetSprintf ( "docid==DOCID_MAX (source broken?)" );
+				m_sLastError.SetSprintf ( "docid[%d]==DOCID_MAX (source broken?)",pSource->m_tDocInfo.m_iDocID );
 				return 0;
 			}
 
@@ -10406,7 +10519,7 @@ int CSphIndex_VLN::Build ( const CSphVector<CSphSource*> & dSources, int iMemory
 					if ( bLastFound )
 						*pHits++ = *pHit;
 				}
-			}
+			}//end for loop
 		}
 
 		// this source is over, disconnect and update stats
@@ -19843,11 +19956,12 @@ ISphHits * CSphSource_Document::IterateHits ( CSphString & sError )
 {
 	if ( m_tState.m_bDocumentDone )
 		return NULL;
-
-	m_tHits.m_dData.Resize ( 0 );
-
+	if(m_tHits.First ()) {
+		if(m_tHits.First ()->m_iDocID != m_tDocInfo.m_iDocID)
+			m_tHits.m_dData.Resize ( 0 );
+	}else
+		m_tHits.m_dData.Resize ( 0 );
 	BuildHits ( sError, false );
-
 	return &m_tHits;
 }
 
@@ -20179,8 +20293,8 @@ void CSphSource_Document::BuildHits ( CSphString & sError, bool bSkipEndMarker )
 	{
 		if ( !m_tState.m_bProcessingHits )
 		{
-			// get that field
-			BYTE * sField = m_tState.m_dFields[m_tState.m_iField-m_tState.m_iStartField];
+			// get that field			
+			BYTE * sField = GetField(m_tState.m_iField-m_tState.m_iStartField);
 			if ( !sField || !(*sField) )
 				continue;
 
@@ -20243,6 +20357,13 @@ SphRange_t CSphSource_Document::IterateFieldMVAStart ( int iAttr )
 	tRange.m_iLength = iCount;
 
 	return tRange;
+}
+
+// -coreseek -pysource
+BYTE* CSphSource_Document::GetField ( int iFieldIndex)
+{
+	//use dFields for compatible reason, keep this.
+	return m_tState.m_dFields[iFieldIndex];
 }
 
 
