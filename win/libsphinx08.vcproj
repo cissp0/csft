@@ -187,7 +187,7 @@
 				Optimization="2"
 				AdditionalIncludeDirectories="$(SolutionDir)/libstemmer_c/include; $(SolutionDir)/libexpat/lib"
 				PreprocessorDefinitions="WIN32;NDEBUG;_LIB"
-				ExceptionHandling="0"
+				ExceptionHandling="1"
 				RuntimeLibrary="0"
 				UsePrecompiledHeader="0"
 				ProgramDataBaseFileName="$(IntDir)/$(ProjectName).pdb"
@@ -301,6 +301,18 @@
 			UniqueIdentifier="{4FC737F1-C7A5-4376-A066-2A32D752A2FF}"
 			>
 			<File
+				RelativePath="..\src\py_helper.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\src\py_layer.cpp"
+				>
+			</File>
+			<File
+				RelativePath="..\src\py_source.cpp"
+				>
+			</File>
+			<File
 				RelativePath="..\src\sphinx.cpp"
 				>
 			</File>
@@ -370,6 +382,18 @@
 			Filter="h;hpp;hxx;hm;inl;inc;xsd"
 			UniqueIdentifier="{93995380-89BD-4b04-88EB-625FBE52EBFB}"
 			>
+			<File
+				RelativePath="..\src\py_helper.h"
+				>
+			</File>
+			<File
+				RelativePath="..\src\py_layer.h"
+				>
+			</File>
+			<File
+				RelativePath="..\src\py_source.h"
+				>
+			</File>
 			<File
 				RelativePath="..\src\sphinx.h"
 				>

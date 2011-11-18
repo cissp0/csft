@@ -32,8 +32,12 @@
 
 	#define UNALIGNED_RAM_ACCESS	1
 	#define USE_LITTLE_ENDIAN		1
+	#define USE_PYTHON              1       /// whether to compile Python support, NOTE:Coreseek Fork, this option must be on!
+        #define USE_PYTHON_DEBUG                0 ///link to _d.lib or not
+        #define USE_PYTHON_CASE_SENSIVE_ATTR            1 ///column case senstive @python
 #else
 	#define USE_WINDOWS		0	/// whether to compile for Windows
+	#define USE_PYTHON_CASE_SENSIVE_ATTR            1 ///column case senstive @python
 #endif
 
 /////////////////////////////////////////////////////////////////////////////
@@ -49,6 +53,9 @@
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
+
+#include "sph_darts.h"
+#include <algorithm>
 
 #if USE_PGSQL
 #include <libpq-fe.h>
@@ -1192,11 +1199,18 @@ enum ESphEvalStage
 struct CSphColumnInfo
 {
 	CSphString		m_sName;		///< column name
+
+#if USE_PYTHON_CASE_SENSIVE_ATTR
+ 	CSphString		m_sNameExactly;		///< column name --by coreseek, the exactly name
+#endif
+
 	ESphAttr		m_eAttrType;	///< attribute type
 	ESphWordpart	m_eWordpart;	///< wordpart processing type
 	bool			m_bIndexed;		///< whether to index this column as fulltext field too
 
 	int				m_iIndex;		///< index into source result set (-1 for joined fields)
+	int				m_iMVAIndex;	///< index the mva indexer, for faster reassign values. -pysource
+
 	CSphAttrLocator	m_tLocator;		///< attribute locator in the row
 
 	ESphAttrSrc		m_eSrc;			///< attr source (for multi-valued attrs only)
@@ -1212,10 +1226,14 @@ struct CSphColumnInfo
 	/// handy ctor
 	CSphColumnInfo ( const char * sName=NULL, ESphAttr eType=SPH_ATTR_NONE )
 		: m_sName ( sName )
+#if USE_PYTHON_CASE_SENSIVE_ATTR
+		, m_sNameExactly ( sName )
+#endif
 		, m_eAttrType ( eType )
 		, m_eWordpart ( SPH_WORDPART_WHOLE )
 		, m_bIndexed ( false )
 		, m_iIndex ( -1 )
+		, m_iMVAIndex( -1 )
 		, m_eSrc ( SPH_ATTRSRC_NONE )
 		, m_pExpr ( NULL )
 		, m_eAggrFunc ( SPH_AGGR_NONE )
@@ -1223,6 +1241,9 @@ struct CSphColumnInfo
 		, m_bPayload ( false )
 		, m_bFilename ( false )
 	{
+#if USE_PYTHON_CASE_SENSIVE_ATTR
+		m_sNameExactly = m_sName;
+#endif
 		m_sName.ToLower ();
 	}
 
@@ -1237,19 +1258,34 @@ struct CSphColumnInfo
 	}
 };
 
-
 /// source schema
 struct CSphSchema
 {
+public:
+	typedef SphDarts::DoubleArray::result_pair_type result_pair_type;
+
 	CSphString						m_sName;		///< my human-readable name
 	CSphVector<CSphColumnInfo>		m_dFields;		///< my fulltext-searchable fields
 	int								m_iBaseFields;	///< how much fields are base, how much are additional (only affects indexer)
 
+	SphDarts::DoubleArray* m_pfield_cache; ///< the field cache.
+	void* m_pfield_cache_owner;
 public:
 
 	/// ctor
-	explicit				CSphSchema ( const char * sName="(nameless)" ) : m_sName ( sName ), m_iBaseFields ( 0 ), m_iStaticSize ( 0 ) {}
+	explicit				CSphSchema ( const char * sName="(nameless)" ) : m_sName ( sName ), m_iBaseFields ( 0 ), m_iStaticSize ( 0 ) {
+		m_pfield_cache = NULL;
+		m_pfield_cache_owner = this; //avoid multi release when assign.
+	}
 
+	~CSphSchema() {
+		if(m_pfield_cache && m_pfield_cache_owner == this) {
+			delete m_pfield_cache;
+			m_pfield_cache = NULL;
+		}
+	}
+	/// build the access cache
+	int					BuildFieldIndexCache();
 	/// get field index by name
 	/// returns -1 if not found
 	int						GetFieldIndex ( const char * sName ) const;
@@ -1533,6 +1569,9 @@ public:
 	/// gets called when the indexing is succesfully (!) over
 	virtual void						PostIndex () {}
 
+public: //append by -coreseek for -pysource. no NOT use this out side of pysource
+	virtual void AddHit ( SphDocID_t , SphWordID_t , Hitpos_t  ) {}
+
 protected:
 	ISphTokenizer *						m_pTokenizer;	///< my tokenizer
 	CSphDict *							m_pDict;		///< my dict
@@ -1573,11 +1612,13 @@ public:
 	/// my generic tokenizer
 	virtual bool			IterateDocument ( CSphString & sError );
 	virtual ISphHits *		IterateHits ( CSphString & sError );
-	void					BuildHits ( CSphString & sError, bool bSkipEndMarker );
+	virtual	void			BuildHits ( CSphString & sError, bool bSkipEndMarker ); //change to virtual -> pysource.
 
+	virtual BYTE*			GetField ( int iFieldIndex); // reused by -pysource
 	/// field data getter
 	/// to be implemented by descendants
 	virtual BYTE **			NextDocument ( CSphString & sError ) = 0;
+
 
 	virtual void			SetDumpRows ( FILE * fpDumpRows ) { m_fpDumpRows = fpDumpRows; }
 
