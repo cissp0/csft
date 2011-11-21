@@ -1124,7 +1124,7 @@ bool XQParser_t::Parse ( XQQuery_t & tParsed, const char * sQuery, const ISphTok
 
 //////////////////////////////////////////////////////////////////////////
 
-#define XQDEBUG 0
+#define XQDEBUG 1
 
 #if XQDEBUG
 static void xqIndent ( int iIndent )
@@ -1154,7 +1154,7 @@ static void xqDump ( XQNode_t * pNode, const CSphSchema & tSch, int iIndent )
 	} else
 	{
 		xqIndent ( iIndent );
-		printf ( "MATCH(%d,%d):", pNode->m_uFieldMask, pNode->m_iOpArg );
+		printf ( "MATCH(%d,%d):", pNode->m_dFieldMask, pNode->m_iOpArg );
 
 		ARRAY_FOREACH ( i, pNode->m_dWords )
 		{
