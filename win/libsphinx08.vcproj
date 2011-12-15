@@ -6,7 +6,7 @@
 	ProjectGUID="{6A1685DE-0265-4243-965F-96CB53EBBCA6}"
 	RootNamespace="libsphinx"
 	Keyword="Win32Proj"
-	TargetFrameworkVersion="131072"
+	TargetFrameworkVersion="196613"
 	>
 	<Platforms>
 		<Platform
@@ -24,7 +24,6 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="4"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
 			ExcludeBuckets="5;6;8;9;13;15"
 			>
@@ -51,7 +50,7 @@
 				MinimalRebuild="true"
 				ExceptionHandling="0"
 				BasicRuntimeChecks="3"
-				RuntimeLibrary="1"
+				RuntimeLibrary="3"
 				UsePrecompiledHeader="0"
 				ProgramDataBaseFileName="$(IntDir)/$(ProjectName).pdb"
 				WarningLevel="4"
@@ -93,7 +92,6 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="4"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
 			ExcludeBuckets="5;6;8;9;13;15"
 			>
@@ -159,7 +157,6 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="4"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
 			ExcludeBuckets="5;6;8;9;13;15"
 			>
@@ -229,7 +226,6 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="4"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
 			ExcludeBuckets="5;6;8;9;13;15"
 			>

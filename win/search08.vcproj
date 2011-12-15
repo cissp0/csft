@@ -6,7 +6,7 @@
 	ProjectGUID="{571DC41A-2665-476C-ABED-3899324E19AB}"
 	RootNamespace="search"
 	Keyword="Win32Proj"
-	TargetFrameworkVersion="131072"
+	TargetFrameworkVersion="196613"
 	>
 	<Platforms>
 		<Platform
@@ -24,9 +24,7 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="1"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
-			ExcludeBuckets="5;6;8;9;13;14;15"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -50,7 +48,7 @@
 				MinimalRebuild="true"
 				ExceptionHandling="0"
 				BasicRuntimeChecks="3"
-				RuntimeLibrary="1"
+				RuntimeLibrary="3"
 				UsePrecompiledHeader="0"
 				ProgramDataBaseFileName="$(IntDir)/$(ProjectName).pdb"
 				WarningLevel="4"
@@ -106,9 +104,7 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="1"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
-			ExcludeBuckets="5;6;8;9;13;14;15"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -130,7 +126,7 @@
 				Optimization="2"
 				PreprocessorDefinitions="WIN32;NDEBUG;_CONSOLE"
 				ExceptionHandling="0"
-				RuntimeLibrary="0"
+				RuntimeLibrary="2"
 				UsePrecompiledHeader="0"
 				ProgramDataBaseFileName="$(IntDir)/$(ProjectName).pdb"
 				WarningLevel="4"
@@ -186,9 +182,7 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="1"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
-			ExcludeBuckets="5;6;8;9;13;14;15"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
@@ -269,9 +263,7 @@
 			OutputDirectory="$(SolutionDir)/bin/$(ConfigurationName)"
 			IntermediateDirectory="$(SolutionDir)/junk/$(ConfigurationName)"
 			ConfigurationType="1"
-			InheritedPropertySheets="$(VCInstallDir)VCProjectDefaults\UpgradeFromVC71.vsprops"
 			CharacterSet="2"
-			ExcludeBuckets="5;6;8;9;13;14;15"
 			>
 			<Tool
 				Name="VCPreBuildEventTool"
