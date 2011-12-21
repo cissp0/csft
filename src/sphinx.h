@@ -32,7 +32,7 @@
 
 	#define UNALIGNED_RAM_ACCESS	1
 	#define USE_LITTLE_ENDIAN		1
-	#define USE_PYTHON              0       /// whether to compile Python support, NOTE:Coreseek Fork, this option must be on!
+	#define USE_PYTHON              1       /// whether to compile Python support, NOTE:Coreseek Fork, this option must be on!
         #define USE_PYTHON_DEBUG                0 ///link to _d.lib or not
         #define USE_PYTHON_CASE_SENSIVE_ATTR            1 ///column case senstive @python
 #else
