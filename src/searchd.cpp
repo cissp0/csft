@@ -193,9 +193,9 @@ public:
 	void SetupTLS ();
 
 private:
-	CrashQuery_t			m_tQuery;
-
-	static SphThreadKey_t	m_tLastQueryTLS; // last query ( non threaded workers could use dist_threads too )
+	CrashQuery_t			m_tQuery;			// per thread copy of last query for thread mode
+	static CrashQuery_t		m_tForkQuery;		// copy of last query for fork / prefork modes
+	static SphThreadKey_t	m_tLastQueryTLS;	// last query ( non threaded workers could use dist_threads too )
 };
 
 enum LogFormat_e
@@ -792,9 +792,10 @@ bool IndexHash_c::Delete ( const CSphString & tKey )
 	// hence, we also need to acquire a lock on entry, and an exclusive one
 	Wlock();
 	bool bRes = false;
-	ServedIndex_t * pEntry = GetWlockedEntry ( tKey );
+	ServedIndex_t * pEntry = BASE::operator() ( tKey );
 	if ( pEntry )
 	{
+		pEntry->WriteLock();
 		pEntry->Unlock();
 		bRes = BASE::Delete ( tKey );
 	}
@@ -1537,6 +1538,7 @@ static int		g_iCrashInfoLen = 0;
 static char		g_sMinidump[SPH_TIME_PID_MAX_SIZE] = "";
 #endif
 
+CrashQuery_t SphCrashLogger_c::m_tForkQuery = CrashQuery_t();
 SphThreadKey_t SphCrashLogger_c::m_tLastQueryTLS = SphThreadKey_t ();
 
 void SphCrashLogger_c::Init ()
@@ -1678,6 +1680,7 @@ LONG WINAPI SphCrashLogger_c::HandleCrash ( EXCEPTION_POINTERS * pExc )
 
 void SphCrashLogger_c::SetLastQuery ( const CrashQuery_t & tQuery )
 {
+	m_tForkQuery = tQuery;
 	SphCrashLogger_c * pCrashLogger = (SphCrashLogger_c *)sphThreadGet ( m_tLastQueryTLS );
 	if ( pCrashLogger )
 	{
@@ -1701,7 +1704,7 @@ void SphCrashLogger_c::SetupTLS ()
 CrashQuery_t SphCrashLogger_c::GetQuery()
 {
 	SphCrashLogger_c * pCrashLogger = (SphCrashLogger_c *)sphThreadGet ( m_tLastQueryTLS );
-	return pCrashLogger ? pCrashLogger->m_tQuery : CrashQuery_t();
+	return pCrashLogger ? pCrashLogger->m_tQuery : m_tForkQuery;
 }
 
 
@@ -3503,6 +3506,8 @@ int RemoteWaitForAgents ( CSphVector<AgentConn_t> & dAgents, int iTimeout, IRepl
 					} else if ( tAgent.m_iReplyStatus==SEARCHD_RETRY )
 					{
 						tAgent.m_eState = AGENT_RETRY;
+						CSphString sAgentError = tReq.GetString ();
+						tAgent.m_sFailure.SetSprintf ( "remote warning: %s", sAgentError.cstr() );
 						break;
 
 					} else if ( tAgent.m_iReplyStatus!=SEARCHD_OK )
@@ -7814,6 +7819,8 @@ enum SqlStmt_e
 	STMT_FLUSH_RTINDEX,
 	STMT_SHOW_VARIABLES,
 	STMT_TRUNCATE_RTINDEX,
+	STMT_SELECT_SYSVAR,
+	STMT_SHOW_COLLATION,
 
 	STMT_TOTAL
 };
@@ -8424,9 +8431,12 @@ void SqlParser_c::AddUpdatedAttr ( const CSphString& sName, ESphAttr eType )
 
 void SqlParser_c::UpdateAttr ( const CSphString& sName, const SqlNode_t * pValue, ESphAttr eType )
 {
+	assert ( eType==SPH_ATTR_FLOAT || eType==SPH_ATTR_INTEGER || eType==SPH_ATTR_BIGINT );
 	if ( eType==SPH_ATTR_FLOAT )
+	{
 		m_pStmt->m_tUpdate.m_dPool.Add ( *(const DWORD*)( &pValue->m_fValue ) );
-	else // default: if ( eType==SPH_ATTR_INTEGER )
+
+	} else if ( eType==SPH_ATTR_INTEGER || eType==SPH_ATTR_BIGINT )
 	{
 		m_pStmt->m_tUpdate.m_dPool.Add ( (DWORD) pValue->m_iValue );
 		DWORD uHi = (DWORD) ( pValue->m_iValue>>32 );
@@ -8439,25 +8449,36 @@ void SqlParser_c::UpdateAttr ( const CSphString& sName, const SqlNode_t * pValue
 	AddUpdatedAttr ( sName, eType );
 }
 
-void SqlParser_c::UpdateMVAAttr ( const CSphString& sName, const SqlNode_t& dValues )
+void SqlParser_c::UpdateMVAAttr ( const CSphString & sName, const SqlNode_t & dValues )
 {
 	CSphAttrUpdate & tUpd = m_pStmt->m_tUpdate;
-	assert ( dValues.m_pValues.Ptr() && dValues.m_pValues->GetLength()>0 );
-	dValues.m_pValues->Uniq(); // don't need dupes within MVA
-	tUpd.m_dPool.Add ( dValues.m_pValues->GetLength()*2 );
-	SphAttr_t * pVal = dValues.m_pValues.Ptr()->Begin();
-	SphAttr_t * pValMax = pVal + dValues.m_pValues->GetLength();
 	ESphAttr eType = SPH_ATTR_UINT32SET;
-	for ( ;pVal<pValMax; pVal++ )
+
+	if ( dValues.m_pValues.Ptr() && dValues.m_pValues->GetLength()>0 )
 	{
-		SphAttr_t uVal = *pVal;
-		if ( uVal>UINT_MAX )
+		// got MVA values, let's process them
+		dValues.m_pValues->Uniq(); // don't need dupes within MVA
+		tUpd.m_dPool.Add ( dValues.m_pValues->GetLength()*2 );
+		SphAttr_t * pVal = dValues.m_pValues.Ptr()->Begin();
+		SphAttr_t * pValMax = pVal + dValues.m_pValues->GetLength();
+		for ( ;pVal<pValMax; pVal++ )
 		{
-			eType = SPH_ATTR_UINT64SET;
+			SphAttr_t uVal = *pVal;
+			if ( uVal>UINT_MAX )
+			{
+				eType = SPH_ATTR_UINT64SET;
+			}
+			tUpd.m_dPool.Add ( (DWORD)uVal );
+			tUpd.m_dPool.Add ( (DWORD)( uVal>>32 ) );
 		}
-		tUpd.m_dPool.Add ( (DWORD)uVal );
-		tUpd.m_dPool.Add ( (DWORD)( uVal>>32 ) );
+	} else
+	{
+		// no values, means we should delete the attribute
+		// we signal that to the update code by putting a single zero
+		// to the values pool (meaning a zero-length MVA values list)
+		tUpd.m_dPool.Add ( 0 );
 	}
+
 	AddUpdatedAttr ( sName, eType );
 }
 
@@ -9572,7 +9593,7 @@ static void DoCommandUpdate ( const char * sIndex, const CSphAttrUpdate & tUpd,
 	int & iSuccesses, int & iUpdated,
 	SearchFailuresLog_c & dFails, const ServedIndex_t * pServed )
 {
-	if ( !pServed || !pServed->m_pIndex )
+	if ( !pServed || !pServed->m_pIndex || !pServed->m_bEnabled )
 	{
 		dFails.Submit ( sIndex, "index not available" );
 		return;
@@ -9592,6 +9613,19 @@ static void DoCommandUpdate ( const char * sIndex, const CSphAttrUpdate & tUpd,
 	}
 }
 
+static const ServedIndex_t * UpdateGetLockedIndex ( const CSphString & sName, bool bMvaUpdate )
+{
+	const ServedIndex_t * pLocked = g_pIndexes->GetRlockedEntry ( sName );
+	if ( !pLocked )
+		return NULL;
+
+	if ( !( bMvaUpdate && pLocked->m_bRT ) )
+		return pLocked;
+
+	pLocked->Unlock();
+	return g_pIndexes->GetWlockedEntry ( sName );
+}
+
 
 void HandleCommandUpdate ( int iSock, int iVer, InputBuffer_c & tReq )
 {
@@ -9603,6 +9637,8 @@ void HandleCommandUpdate ( int iSock, int iVer, InputBuffer_c & tReq )
 	CSphAttrUpdate tUpd;
 	CSphVector<DWORD> dMva;
 
+	bool bMvaUpdate = false;
+
 	tUpd.m_dAttrs.Resize ( tReq.GetDword() ); // FIXME! check this
 	ARRAY_FOREACH ( i, tUpd.m_dAttrs )
 	{
@@ -9611,8 +9647,13 @@ void HandleCommandUpdate ( int iSock, int iVer, InputBuffer_c & tReq )
 
 		tUpd.m_dAttrs[i].m_eAttrType = SPH_ATTR_INTEGER;
 		if ( iVer>=0x102 )
+		{
 			if ( tReq.GetDword() )
+			{
 				tUpd.m_dAttrs[i].m_eAttrType = SPH_ATTR_UINT32SET;
+				bMvaUpdate = true;
+			}
+		}
 	}
 
 	int iNumUpdates = tReq.GetInt (); // FIXME! check this
@@ -9686,7 +9727,6 @@ void HandleCommandUpdate ( int iSock, int iVer, InputBuffer_c & tReq )
 			if ( pDistIndex )
 			{
 				dDistributed[i] = *pDistIndex;
-				dDistributed[i].m_bToDelete = true; // our presence flag
 			}
 
 			g_tDistLock.Unlock();
@@ -9709,20 +9749,20 @@ void HandleCommandUpdate ( int iSock, int iVer, InputBuffer_c & tReq )
 	ARRAY_FOREACH ( iIdx, dIndexNames )
 	{
 		const char * sReqIndex = dIndexNames[iIdx].m_sName.cstr();
-		const ServedIndex_t * pLocked = g_pIndexes->GetWlockedEntry ( sReqIndex );
+		const ServedIndex_t * pLocked = UpdateGetLockedIndex ( sReqIndex, bMvaUpdate );
 		if ( pLocked )
 		{
 			DoCommandUpdate ( sReqIndex, tUpd, iSuccesses, iUpdated, dFails, pLocked );
 			pLocked->Unlock();
 		} else
 		{
-			assert ( dDistributed[iIdx].m_bToDelete );
+			assert ( dDistributed[iIdx].m_dLocal.GetLength() || dDistributed[iIdx].m_dAgents.GetLength() );
 			CSphVector<CSphString>& dLocal = dDistributed[iIdx].m_dLocal;
 
 			ARRAY_FOREACH ( i, dLocal )
 			{
 				const char * sLocal = dLocal[i].cstr();
-				const ServedIndex_t * pServed = g_pIndexes->GetWlockedEntry ( sLocal );
+				const ServedIndex_t * pServed = UpdateGetLockedIndex ( sLocal, bMvaUpdate );
 				DoCommandUpdate ( sLocal, tUpd, iSuccesses, iUpdated, dFails, pServed );
 				if ( pServed )
 					pServed->Unlock();
@@ -9730,7 +9770,7 @@ void HandleCommandUpdate ( int iSock, int iVer, InputBuffer_c & tReq )
 		}
 
 		// update remote agents
-		if ( dDistributed[iIdx].m_bToDelete && dDistributed[iIdx].m_dAgents.GetLength() )
+		if ( dDistributed[iIdx].m_dAgents.GetLength() )
 		{
 			DistributedIndex_t & tDist = dDistributed[iIdx];
 
@@ -10101,14 +10141,17 @@ void HandleClientSphinx ( int iSock, const char * sClientIP, ThdDesc_t * pThd )
 			|| iLength<0 || iLength>g_iMaxPacketSize )
 		{
 			// unknown command, default response header
-			tBuf.SendErrorReply ( "unknown command (code=%d)", iCommand );
+			tBuf.SendErrorReply ( "invalid command (code=%d, len=%d)", iCommand, iLength );
 
 			// if request length is insane, low level comm is broken, so we bail out
 			if ( iLength<0 || iLength>g_iMaxPacketSize )
-			{
 				sphWarning ( "ill-formed client request (length=%d out of bounds)", iLength );
-				return;
-			}
+
+			// if command is insane, low level comm is broken, so we bail out
+			if ( iCommand<0 || iCommand>=SEARCHD_COMMAND_TOTAL )
+				sphWarning ( "ill-formed client request (command=%d, SEARCHD_COMMAND_TOTAL=%d)", iCommand, SEARCHD_COMMAND_TOTAL );
+
+			return;
 		}
 
 		// count commands
@@ -10551,13 +10594,22 @@ void HandleMysqlInsert ( const SqlStmt_t & tStmt, NetOutputBuffer_c & tOut, BYTE
 					sError.SetSprintf ( "raw %d, column %d: MVA value specified for a non-MVA column", 1+c, 1+iQuerySchemaIdx ); // 1 for human base
 					break;
 				}
+				if ( ( tCol.m_eAttrType==SPH_ATTR_UINT32SET || tCol.m_eAttrType==SPH_ATTR_UINT64SET ) && tVal.m_iType!=TOK_CONST_MVA )
+				{
+					sError.SetSprintf ( "raw %d, column %d: non-MVA value specified for a MVA column", 1+c, 1+iQuerySchemaIdx ); // 1 for human base
+					break;
+				}
 
 				if ( tCol.m_eAttrType==SPH_ATTR_UINT32SET || tCol.m_eAttrType==SPH_ATTR_UINT64SET )
 				{
 					// collect data from scattered insvals
 					// FIXME! maybe remove this mess, and just have a single m_dMvas pool in parser instead?
-					tVal.m_pVals->Uniq();
-					int iLen = tVal.m_pVals->GetLength();
+					int iLen = 0;
+					if ( tVal.m_pVals.Ptr() )
+					{
+						tVal.m_pVals->Uniq();
+						iLen = tVal.m_pVals->GetLength();
+					}
 					if ( tCol.m_eAttrType==SPH_ATTR_UINT64SET )
 					{
 						dMvas.Add ( iLen*2 );
@@ -11168,7 +11220,6 @@ void HandleMysqlUpdate ( NetOutputBuffer_c & tOut, BYTE uPacketID, const SqlStmt
 			if ( pDistIndex )
 			{
 				dDistributed[i] = *pDistIndex;
-				dDistributed[i].m_bToDelete = true; // our presence flag
 			}
 
 			g_tDistLock.Unlock();
@@ -11190,28 +11241,35 @@ void HandleMysqlUpdate ( NetOutputBuffer_c & tOut, BYTE uPacketID, const SqlStmt
 	int iUpdated = 0;
 	int iWarns = 0;
 
+	bool bMvaUpdate = false;
+	ARRAY_FOREACH_COND ( i, tStmt.m_tUpdate.m_dAttrs, !bMvaUpdate )
+	{
+		bMvaUpdate = ( tStmt.m_tUpdate.m_dAttrs[i].m_eAttrType==SPH_ATTR_UINT32SET
+			|| tStmt.m_tUpdate.m_dAttrs[i].m_eAttrType==SPH_ATTR_UINT64SET );
+	}
+
 	ARRAY_FOREACH ( iIdx, dIndexNames )
 	{
 		const char * sReqIndex = dIndexNames[iIdx].m_sName.cstr();
-		const ServedIndex_t * pLocked = g_pIndexes->GetWlockedEntry ( sReqIndex );
+		const ServedIndex_t * pLocked = UpdateGetLockedIndex ( sReqIndex, bMvaUpdate );
 		if ( pLocked )
 		{
 			DoExtendedUpdate ( sReqIndex, tStmt, iSuccesses, iUpdated, bCommit, dFails, pLocked );
 		} else
 		{
-			assert ( dDistributed[iIdx].m_bToDelete );
+			assert ( dDistributed[iIdx].m_dLocal.GetLength() || dDistributed[iIdx].m_dAgents.GetLength() );
 			CSphVector<CSphString>& dLocal = dDistributed[iIdx].m_dLocal;
 
 			ARRAY_FOREACH ( i, dLocal )
 			{
 				const char * sLocal = dLocal[i].cstr();
-				const ServedIndex_t * pServed = g_pIndexes->GetWlockedEntry ( sLocal );
+				const ServedIndex_t * pServed = UpdateGetLockedIndex ( sLocal, bMvaUpdate );
 				DoExtendedUpdate ( sLocal, tStmt, iSuccesses, iUpdated, bCommit, dFails, pServed );
 			}
 		}
 
 		// update remote agents
-		if ( dDistributed[iIdx].m_bToDelete && dDistributed[iIdx].m_dAgents.GetLength() )
+		if ( dDistributed[iIdx].m_dAgents.GetLength() )
 		{
 			DistributedIndex_t & tDist = dDistributed[iIdx];
 
@@ -12264,6 +12322,67 @@ public:
 			HandleMysqlTruncate ( *pStmt, tOut, uPacketID );
 			return;
 
+		case STMT_SELECT_SYSVAR:
+			{
+				CSphString sVar = pStmt->m_tQuery.m_sQuery;
+				sVar.ToLower();
+
+				if ( sVar=="@@session.auto_increment_increment" )
+				{
+					// MySQL Connector/J really expects an answer here
+					tOut.SendLSBDword ( ((uPacketID++)<<24) + 2 );
+					tOut.SendByte ( 1 ); // field count (level+code+message)
+					tOut.SendByte ( 0 ); // extra
+
+					// field packet, var name
+					SendMysqlFieldPacket ( tOut, uPacketID++, sVar.cstr(), MYSQL_COL_LONG );
+					SendMysqlEofPacket ( tOut, uPacketID++, 0 );
+
+					// data packet, var value
+					tOut.SendLSBDword ( ((uPacketID++)<<24) + 2 ); // following string length and data
+					tOut.SendMysqlString ( "1" );
+
+					// done
+					SendMysqlEofPacket ( tOut, uPacketID++, 0 );
+				} else
+				{
+					// generally, just send empty response
+					SendMysqlOkPacket ( tOut, uPacketID );
+				}
+			}
+			return;
+
+		case STMT_SHOW_COLLATION:
+			// MySQL Connector/J really expects an answer here
+			tOut.SendLSBDword ( ((uPacketID++)<<24) + 2 );
+			tOut.SendByte ( 6 ); // field count (collation+charset+id+default+compiled+sortlen)
+			tOut.SendByte ( 0 ); // extra
+
+			// field packets
+			SendMysqlFieldPacket ( tOut, uPacketID++, "Collation", MYSQL_COL_STRING );
+			SendMysqlFieldPacket ( tOut, uPacketID++, "Charset", MYSQL_COL_STRING );
+			SendMysqlFieldPacket ( tOut, uPacketID++, "Id", MYSQL_COL_LONG );
+			SendMysqlFieldPacket ( tOut, uPacketID++, "Default", MYSQL_COL_STRING );
+			SendMysqlFieldPacket ( tOut, uPacketID++, "Compiled", MYSQL_COL_STRING );
+			SendMysqlFieldPacket ( tOut, uPacketID++, "Sortlen", MYSQL_COL_STRING );
+			SendMysqlEofPacket ( tOut, uPacketID++, 0 );
+
+			// data packets
+			dRows.Reset();
+			dRows.PutString ( "utf8_general_ci" );
+			dRows.PutString ( "utf8" );
+			dRows.PutString ( "33" );
+			dRows.PutString ( "Yes" );
+			dRows.PutString ( "Yes" );
+			dRows.PutString ( "1" );
+			tOut.SendLSBDword ( ((uPacketID++)<<24) + ( dRows.Length() ) );
+			tOut.SendBytes ( dRows.Off ( 0 ), dRows.Length() );
+
+			// done
+			dRows.Reset();
+			SendMysqlEofPacket ( tOut, uPacketID++, 0 );
+			return;
+
 		default:
 			m_sError.SetSprintf ( "internal error: unhandled statement type (value=%d)", eStmt );
 			SendMysqlErrorPacket ( tOut, uPacketID, sQuery.cstr(), m_sError.cstr() );
@@ -12313,7 +12432,8 @@ void HandleClientMySQL ( int iSock, const char * sClientIP, ThdDesc_t * pThd )
 
 	if ( sphSockSend ( iSock, g_sMysqlHandshake, g_iMysqlHandshake )!=g_iMysqlHandshake )
 	{
-		sphWarning ( "failed to send server version (client=%s)", sClientIP );
+		int iErrno = sphSockGetErrno ();
+		sphWarning ( "failed to send server version (client=%s, error: %d '%s')", sClientIP, iErrno, sphSockError ( iErrno ) );
 		return;
 	}
 
@@ -14884,6 +15004,25 @@ void ShowProgress ( const CSphIndexProgress * pProgress, bool bPhaseEnd )
 }
 
 
+void FailClient ( int iSock, SearchdStatus_e eStatus, const char * sMessage )
+{
+	assert ( eStatus==SEARCHD_RETRY || eStatus==SEARCHD_ERROR );
+
+	int iRespLen = 4 + strlen(sMessage);
+
+	NetOutputBuffer_c tOut ( iSock );
+	tOut.SendInt ( SPHINX_SEARCHD_PROTO );
+	tOut.SendWord ( (WORD)eStatus );
+	tOut.SendWord ( 0 ); // version doesn't matter
+	tOut.SendInt ( iRespLen );
+	tOut.SendString ( sMessage );
+	tOut.Flush ();
+
+	// FIXME? without some wait, client fails to receive the response on windows
+	sphSockClose ( iSock );
+}
+
+
 Listener_t * DoAccept ( int * pClientSock, char * sClientName )
 {
 	int iMaxFD = 0;
@@ -14977,8 +15116,22 @@ Listener_t * DoAccept ( int * pClientSock, char * sClientName )
 
 		// accepted!
 #if !USE_WINDOWS
+		// FIXME!!! either get git of select() or allocate list of FD (with dup2 back instead close for thouse FD)
+		// with threads workers to prevent dup2 closes valid FD
+
 		if ( SPH_FDSET_OVERFLOW ( iClientSock ) )
-			iClientSock = dup2 ( iClientSock, g_iClientFD );
+		{
+			if ( ( g_eWorkers==MPM_FORK || g_eWorkers==MPM_PREFORK ) )
+			{
+				iClientSock = dup2 ( iClientSock, g_iClientFD );
+			} else
+			{
+				FailClient ( iClientSock, SEARCHD_RETRY, "server maxed out, retry in a second" );
+				sphWarning ( "maxed out, dismissing client (socket=%d)", iClientSock );
+				sphSockClose ( iClientSock );
+				return NULL;
+			}
+		}
 #endif
 
 		*pClientSock = iClientSock;
@@ -15020,25 +15173,6 @@ void TickPreforked ( CSphProcessSharedMutex * pAcceptMutex )
 		HandleClient ( pListener->m_eProto, iClientSock, sClientIP, NULL );
 		sphSockClose ( iClientSock );
 	}
-}
-
-
-void FailClient ( int iSock, SearchdStatus_e eStatus, const char * sMessage )
-{
-	assert ( eStatus==SEARCHD_RETRY || eStatus==SEARCHD_ERROR );
-
-	int iRespLen = 4 + strlen(sMessage);
-
-	NetOutputBuffer_c tOut ( iSock );
-	tOut.SendInt ( SPHINX_SEARCHD_PROTO );
-	tOut.SendWord ( (WORD)eStatus );
-	tOut.SendWord ( 0 ); // version doesn't matter
-	tOut.SendInt ( iRespLen );
-	tOut.SendString ( sMessage );
-	tOut.Flush ();
-
-	// FIXME? without some wait, client fails to receive the response on windows
-	sphSockClose ( iSock );
 }
 
 
@@ -15125,7 +15259,7 @@ void TickHead ( CSphProcessSharedMutex * pAcceptMutex )
 	if ( !pListener )
 		return;
 
-	if ( ( g_iMaxChildren && g_dChildren.GetLength()>=g_iMaxChildren )
+	if ( ( g_iMaxChildren && ( g_dChildren.GetLength()>=g_iMaxChildren || g_dThd.GetLength()>=g_iMaxChildren ) )
 		|| ( g_iRotateCount && !g_bSeamlessRotate ) )
 	{
 		FailClient ( iClientSock, SEARCHD_RETRY, "server maxed out, retry in a second" );
