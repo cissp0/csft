@@ -941,7 +941,7 @@ bool	CSphSource_Python::IterateMultivaluedStart ( int iAttr, CSphString & sError
 	m_iMultiAttr = iAttr;
 	const CSphColumnInfo & tAttr = m_tSchema.GetAttr(iAttr);
 
-	if ( !(tAttr.m_eAttrType == SPH_ATTR_UINT32SET) )
+	if ( !(tAttr.m_eAttrType==SPH_ATTR_UINT32SET || tAttr.m_eAttrType==SPH_ATTR_UINT64SET ) )
 		return false;
 
 	switch ( tAttr.m_eSrc )
@@ -980,7 +980,7 @@ bool	CSphSource_Python::IterateMultivaluedStart ( int iAttr, CSphString & sError
 bool	CSphSource_Python::IterateMultivaluedNext ()
 {	
 	const CSphColumnInfo & tAttr = m_tSchema.GetAttr ( m_iMultiAttr );
-	assert ( tAttr.m_eAttrType == SPH_ATTR_UINT32SET );
+	assert ( tAttr.m_eAttrType==SPH_ATTR_UINT32SET || tAttr.m_eAttrType==SPH_ATTR_UINT64SET );
 	
 	//m_iMultiAttr
 	if(m_pInstance_GetMVAValue)
@@ -1037,35 +1037,35 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 				}else
 					if(pDocId && PyInt_Check(pDocId))
 						m_tDocInfo.m_iDocID =  PyInt_AsLong(pDocId);
-
 				/*
-				if(PyList_Check(py_varlist)) {
-
-					int size = (int)PyList_Size(py_varlist);
-					for(int i = 0; i < size; i++) {
-						PyObject* item = PyList_GetItem(py_varlist,i);
-						DWORD dVal = (DWORD)(PyInt_AsLong(item));
-						m_tDocInfo.SetAttr ( tLoc, dVal );
-					}
-
-				} // end of if list check
+					// return that tuple or offset to storage for MVA64 value
+					m_tDocInfo.m_iDocID = sphToDocid ( SqlColumn(0) );
+					m_dMva.Resize ( 0 );
+					if ( tAttr.m_eAttrType==SPH_ATTR_UINT32SET )
+						m_dMva.Add ( sphToDword ( SqlColumn(1) ) );
+					else
+						sphAddMva64 ( m_dMva, sphToUint64 ( SqlColumn(1) ) );
 				*/
+				
+				m_dMva.Resize ( 0 );
+				uint64_t d64Val = 0;
+				DWORD dVal  = 0;
 				if(PyInt_Check(py_var)) 
 				{
-					DWORD dVal = (DWORD)(PyInt_AsUnsignedLongMask(py_var));
-					m_tDocInfo.SetAttr ( tLoc, dVal );
+					dVal = (DWORD)(PyInt_AsUnsignedLongMask(py_var));
+					d64Val = dVal;
 				}
 				if(PyLong_Check(py_var)) 
 				{
-/*
-#if USE_64BIT
-					SphAttr_t dVal = (SphAttr_t)(PyLong_AsLongLong(py_var));
-#else
-*/
-					SphAttr_t dVal = (SphAttr_t)(PyInt_AsUnsignedLongLongMask(py_var));
-//#endif
-					m_tDocInfo.SetAttr ( tLoc, dVal );
+					d64Val = (uint64_t)(PyInt_AsUnsignedLongLongMask(py_var));
+					dVal = (DWORD)d64Val; //might overflow, but never mind.
 				}
+
+				//do real assign
+				if ( tAttr.m_eAttrType==SPH_ATTR_UINT32SET )
+					m_dMva.Add ( dVal );
+				else
+					sphAddMva64 ( m_dMva, d64Val );
 			}
 			Py_XDECREF(pResult);
 		}
@@ -1077,11 +1077,15 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 /// begin iterating values of multi-valued attribute iAttr stored in a field
 /// will fail if iAttr is out of range, or is not multi-valued
 bool	CSphSource_Python::IterateFieldMVAStart ( int iAttr, CSphString & /* sError */ ){
+	
 	if ( iAttr<0 || iAttr>=m_tSchema.GetAttrsCount() )
 		return false;
 
 	if ( m_dAttrToFieldMVA [iAttr] == -1 )
 		return false;
+
+	//if ( !(tAttr.m_eAttrType==SPH_ATTR_UINT32SET || tAttr.m_eAttrType==SPH_ATTR_UINT64SET ) )
+	//	return false;
 
 	m_iFieldMVA = iAttr;
 	m_iFieldMVAIterator = 0;
@@ -1597,14 +1601,25 @@ ISphHits * CSphSource_Python::IterateJoinedHits ( CSphString & sError){
 					if(pResultKeys) {
 						PyObject* pItemKey = PyList_GET_ITEM(pResultKeys, i); //+0
 						
-						if (! PyString_Check(pItemKey)) {
+						if (! PyString_Check(pItemKey) && !PyUnicode_Check(pItemKey)) {
 							i++;
 							continue; //if return a hash table, field name must be string
 						}
+
+						iJoinedHitField = -1;
 						pResultItem = PyDict_GetItem(pResult, pItemKey);
 
-						iJoinedHitField = m_tSchema.GetFieldIndex (PyString_AsString(pItemKey));
-						
+						if(PyUnicode_Check(pItemKey)) {
+							PyObject* utf8str = PyUnicode_EncodeUTF8(PyUnicode_AS_UNICODE(pItemKey),
+									PyUnicode_GET_SIZE(pItemKey),
+									"ignore"); //ignore all error unicode char. +1
+								if(utf8str) {
+									//if convert successfully.
+									iJoinedHitField = m_tSchema.GetFieldIndex (PyString_AsString(utf8str));
+								}
+						}else{
+							iJoinedHitField = m_tSchema.GetFieldIndex (PyString_AsString(pItemKey));
+						}
 						if(iJoinedHitField == -1) {
 							//The Column PySource Given not found.
 							fprintf(stderr, "[Error in PySource] Can Not found field named %s, skipping\n" ,PyString_AsString(pItemKey));
