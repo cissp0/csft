@@ -3232,8 +3232,8 @@ void RtIndex_t::SaveDiskHeader ( const char * sFilename, int iCheckpoints, SphOf
 
 
 #if USE_WINDOWS
-//#undef rename
-int rename_sph ( const char * sOld, const char * sNew )
+#undef rename
+int sph_rename ( const char * sOld, const char * sNew )
 {
 	if ( MoveFileEx ( sOld, sNew, MOVEFILE_REPLACE_EXISTING ) )
 		return 0;
@@ -3241,7 +3241,7 @@ int rename_sph ( const char * sOld, const char * sNew )
 	return -1;
 }
 #else
-#define rename_sph rename
+#define sph_rename rename
 #endif
 
 
@@ -3280,7 +3280,7 @@ void RtIndex_t::SaveMeta ( int iDiskChunks )
 	wrMeta.CloseFile(); // FIXME? handle errors?
 
 	// rename
-	if ( ::rename_sph ( sMetaNew.cstr(), sMeta.cstr() ) )
+	if ( ::sph_rename ( sMetaNew.cstr(), sMeta.cstr() ) )
 		sphDie ( "failed to rename meta (src=%s, dst=%s, errno=%d, error=%s)",
 			sMetaNew.cstr(), sMeta.cstr(), errno, strerror(errno) ); // !COMMIT handle this gracefully
 }
@@ -3612,7 +3612,7 @@ bool RtIndex_t::SaveRamChunk ()
 		return false;
 
 	// rename
-	if ( ::rename_sph ( sNewChunk.cstr(), sChunk.cstr() ) )
+	if ( ::sph_rename ( sNewChunk.cstr(), sChunk.cstr() ) )
 		sphDie ( "failed to rename ram chunk (src=%s, dst=%s, errno=%d, error=%s)",
 			sNewChunk.cstr(), sChunk.cstr(), errno, strerror(errno) ); // !COMMIT handle this gracefully
 
@@ -5839,7 +5839,7 @@ void RtBinlog_c::SaveMeta ()
 
 	wrMeta.CloseFile();
 
-	if ( ::rename_sph ( sMeta.cstr(), sMetaOld.cstr() ) )
+	if ( ::sph_rename ( sMeta.cstr(), sMetaOld.cstr() ) )
 		sphDie ( "failed to rename meta (src=%s, dst=%s, errno=%d, error=%s)",
 			sMeta.cstr(), sMetaOld.cstr(), errno, strerror(errno) ); // !COMMIT handle this gracefully
 	sphLogDebug ( "SaveMeta: Done." );
