@@ -20423,7 +20423,7 @@ BYTE* CSphSource_Document::GetField ( int iFieldIndex)
 }
 
 
-static int sphAddMva64 ( CSphVector<DWORD> & dStorage, uint64_t uVal )
+int sphAddMva64 ( CSphVector<DWORD> & dStorage, uint64_t uVal )
 {
 	int uOff = dStorage.GetLength();
 	dStorage.Resize ( uOff+2 );

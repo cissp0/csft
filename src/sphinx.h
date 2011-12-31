@@ -1609,6 +1609,7 @@ enum ESphOnFileFieldError
 	FFE_FAIL_INDEX
 };
 
+int sphAddMva64 ( CSphVector<DWORD> & dStorage, uint64_t uVal ); //forward declare.
 
 /// generic document source
 /// provides multi-field support and generic tokenizer
