@@ -1050,9 +1050,30 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 
 				} // end of if list check
 				*/
+
+				m_dMva.Resize ( 0 );
+				if ( tAttr.m_eAttrType==SPH_ATTR_UINT32SET ) {
+					if(PyInt_Check(py_var)) 
+					{
+						DWORD dVal = (DWORD)(PyInt_AsUnsignedLongMask(py_var));
+						m_dMva.Add ( dVal );
+					}
+					if(PyLong_Check(py_var)) 
+					{
+						SphAttr_t dVal = (SphAttr_t)(PyInt_AsUnsignedLongLongMask(py_var));
+						//FIXME: force type cast?
+						m_dMva.Add ( (DWORD)dVal );
+					}
+				}
+				else{
+					///FIXME: currently python source does not supported mva64
+					///sphAddMva64 ( m_dMva, sphToUint64 ( SqlColumn(1) ) );
+				}
+				/*
 				if(PyInt_Check(py_var)) 
 				{
 					DWORD dVal = (DWORD)(PyInt_AsUnsignedLongMask(py_var));
+					printf("%d\t", dVal);
 					m_tDocInfo.SetAttr ( tLoc, dVal );
 				}
 				if(PyLong_Check(py_var)) 
@@ -1061,11 +1082,13 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 #if USE_64BIT
 					SphAttr_t dVal = (SphAttr_t)(PyLong_AsLongLong(py_var));
 #else
-*/
+* /
 					SphAttr_t dVal = (SphAttr_t)(PyInt_AsUnsignedLongLongMask(py_var));
 //#endif
+					printf("%d\t", dVal);
 					m_tDocInfo.SetAttr ( tLoc, dVal );
 				}
+				*/
 			}
 			Py_XDECREF(pResult);
 		}
