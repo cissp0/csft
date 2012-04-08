@@ -1576,8 +1576,6 @@ protected:
 	SphDocID_t	VerifyID ( SphDocID_t uID );
 };
 
-static int sphAddMva64 ( CSphVector<DWORD> & dStorage, uint64_t uVal );
-
 /// how to handle IO errors in file fields
 enum ESphOnFileFieldError
 {
