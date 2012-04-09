@@ -254,6 +254,7 @@ enum
 	TOKENIZER_UTF8		= 2,
 	TOKENIZER_NGRAM	= 3
 	,TOKENIZER_ZHCN_UTF8 = 4
+	,TOKENIZER_SPACE	 = 10
 };
 
 /// load config file
