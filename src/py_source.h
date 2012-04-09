@@ -47,8 +47,9 @@ public:
 	/// will fail if iAttr is out of range, or is not multi-valued
 	virtual bool						IterateFieldMVAStart ( int iAttr, CSphString & sError );
 
-	/// get next multi-valued (id,attr-value) tuple to m_tDocInfo
+	/// get next multi-valued (id,attr-value) tuple to m_tDocInfo -> seems abandoned
 	virtual bool						IterateFieldMVANext ();
+	int									ParseFieldMVA ( CSphVector < DWORD > & dMva, PyObject * pList, bool bMva64);
 
 	/// helper function for prefix & infix
 	void			AppendPrefix(CSphString & );

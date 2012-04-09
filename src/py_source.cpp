@@ -1022,7 +1022,7 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 			}
 			if(PyTuple_GET_SIZE(pResult) == 2) {
 
-				const CSphAttrLocator & tLoc = m_tSchema.GetAttr ( m_iMultiAttr ).m_tLocator;
+				//const CSphAttrLocator & tLoc = m_tSchema.GetAttr ( m_iMultiAttr ).m_tLocator;
 				// (docid, text)
 				PyObject* pDocId = PyTuple_GetItem(pResult, 0);
 				PyObject* py_var = PyTuple_GetItem(pResult, 1);
@@ -1092,15 +1092,84 @@ bool	CSphSource_Python::IterateFieldMVAStart ( int iAttr, CSphString & /* sError
 	return true;
 }
 
-/// get next multi-valued (id,attr-value) tuple to m_tDocInfo
+
+
+int CSphSource_Python::ParseFieldMVA ( CSphVector < DWORD > & dMva, PyObject * pList, bool bMva64) {
+
+	if(!pList)
+		return 0;
+	if(!PyList_Check(pList)) 
+		return 0;
+
+	assert ( dMva.GetLength() ); // must not have zero offset
+	int uOff = dMva.GetLength();
+	dMva.Add ( 0 ); // reserve value for count
+	
+	/*
+	if ( pDigit )
+	{
+		if ( !bMva64 )
+			dMva.Add ( sphToDword ( pDigit ) );
+		else
+			sphAddMva64 ( dMva, sphToUint64 ( pDigit ) );
+	}
+	*/
+	size_t size = PyList_Size(pList);
+	for(size_t j = 0; j < size; j++) {
+		//PyList_GetItem just a borrowed reference
+		PyObject* py_var = PyList_GetItem(pList,j);
+		
+		uint64_t d64Val = 0;
+		DWORD dVal  = 0;
+		if(PyInt_Check(py_var)) 
+		{
+			dVal = (DWORD)(PyInt_AsUnsignedLongMask(py_var));
+			d64Val = dVal;
+		}
+		if(PyLong_Check(py_var)) 
+		{
+			d64Val = (uint64_t)(PyInt_AsUnsignedLongLongMask(py_var));
+			dVal = (DWORD)d64Val; //might overflow, but never mind.
+		}
+		// FIXME: here is a bug in MVA64
+		if ( !bMva64 )
+			m_dMva.Add ( dVal );
+		else
+			sphAddMva64 ( m_dMva, d64Val );
+	}
+
+	int iCount = dMva.GetLength()-uOff-1;
+	if ( !iCount )
+	{
+		dMva.Pop(); // remove reserved value for count in case of 0 MVAs
+		return 0;
+	} else
+	{
+		dMva[uOff] = iCount;
+		return uOff; // return offset to ( count, [value] )
+	}
+	return 0;
+}
+
+/// get next multi-valued (id,attr-value) tuple to m_tDocInfo -> seems abandoned
 bool	CSphSource_Python::IterateFieldMVANext (){
 	int iFieldMVA = m_dAttrToFieldMVA [m_iFieldMVA];
 	if ( m_iFieldMVAIterator >= m_dFieldMVAs [iFieldMVA].GetLength () )
 		return false;
 
 	const CSphColumnInfo & tAttr = m_tSchema.GetAttr ( m_iFieldMVA );
-	m_tDocInfo.SetAttr ( tAttr.m_tLocator, m_dFieldMVAs [iFieldMVA][m_iFieldMVAIterator] );
-
+	//m_tDocInfo.SetAttr ( tAttr.m_tLocator, m_dFieldMVAs [iFieldMVA][m_iFieldMVAIterator] );
+	m_dMva.Resize ( 0 );
+	
+	{
+		uint64_t d64Val = 0;
+		DWORD dVal  = 0;
+		dVal = d64Val = m_dFieldMVAs [iFieldMVA][m_iFieldMVAIterator];
+		if ( tAttr.m_eAttrType==SPH_ATTR_UINT32SET )
+			m_dMva.Add ( dVal );
+		else
+			sphAddMva64 ( m_dMva, d64Val );
+	}
 	++m_iFieldMVAIterator;
 	return true;
 }
@@ -1431,6 +1500,7 @@ DONE:
 				if(!pList)
 					return NULL;
 				if(PyList_Check(pList)) {
+					/*
 					size_t size = PyList_Size(pList);
 					m_dFieldMVAs [iFieldMVA].Resize ( 0 );
 					for(size_t j = 0; j < size; j++) {
@@ -1444,6 +1514,14 @@ DONE:
 				
 						m_dFieldMVAs [iFieldMVA].Add ( (DWORD)dVal);
 					}
+					*/
+					int uOff = 0;
+					if ( tAttr.m_eSrc==SPH_ATTRSRC_FIELD )
+					{
+						uOff = ParseFieldMVA ( m_dMva, pList, tAttr.m_eAttrType==SPH_ATTR_UINT64SET );
+					}
+					m_tDocInfo.SetAttr ( tAttr.m_tLocator, uOff );
+					//continue;
 				}else{
 					if(pList!= Py_None) {
 						sError.SetSprintf("List expected for attribute, @%s." , (char*)tAttr.m_sName.cstr());
