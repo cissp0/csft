@@ -1898,7 +1898,7 @@ inline int sphUTF8Encode ( BYTE * pBuf, int iCode ); // forward ref for GCC
 
 /// create UTF-8 tokenizer with Chinese Segment support
 ISphTokenizer *			sphCreateUTF8ChineseTokenizer ( const char* dict_path );
-
+ISphTokenizer *			sphCreateUTF8SpaceTokenizer ( );
 #endif
 
 /// synonym list entry
@@ -2197,6 +2197,18 @@ protected:
 	int					m_iLastTokenLenMMSeg;			///< last token length, in codepoints
 };
 
+class CSphTokenizer_UTF8Space:public CSphTokenizer_UTF8MMSeg
+{
+
+public:
+	virtual void				SetBuffer ( BYTE * sBuffer, int iLength );
+	virtual ISphTokenizer *		Clone ( bool bEscaped ) const;
+
+protected:
+	virtual bool				IsSegment(const BYTE * pCur);
+
+};
+
 #endif
 
 #if USE_WINDOWS
@@ -2230,6 +2242,11 @@ ISphTokenizer *	sphCreateUTF8ChineseTokenizer ( const char* dict_path )
 	return tokenizer;
 }
 
+ISphTokenizer *	sphCreateUTF8SpaceTokenizer ( )
+{
+	CSphTokenizer_UTF8Space* tokenizer = new CSphTokenizer_UTF8Space ();
+	return tokenizer;
+}
 #endif 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -2968,6 +2985,7 @@ ISphTokenizer * ISphTokenizer::Create ( const CSphTokenizerSettings & tSettings,
 		case TOKENIZER_ZHCN_UTF8:
 			pTokenizer = sphCreateUTF8ChineseTokenizer
 				(tSettings.m_sDictPath.cstr()); break;
+		case TOKENIZER_SPACE:  pTokenizer = sphCreateUTF8SpaceTokenizer (); break;
 #endif
 		default:
 			sError.SetSprintf ( "failed to create tokenizer (unknown charset type '%d')", tSettings.m_iType );
@@ -4891,6 +4909,31 @@ const BYTE* CSphTokenizer_UTF8MMSeg::GetThesaurus(BYTE * sBuffer, int iLength )
 	if(seg)
 		return (const BYTE*)seg->thesaurus((const char*)sBuffer, iLength);
 	return NULL;
+}
+
+////////////////////////////////////////////////////////////////////////
+
+void CSphTokenizer_UTF8Space::SetBuffer ( BYTE * sBuffer, int iLength )
+{
+	CSphTokenizer_UTF8::SetBuffer(sBuffer, iLength);
+	m_segoffset = 0;
+	m_segToken = (char*)m_pCur;
+}
+
+bool CSphTokenizer_UTF8Space::IsSegment(const BYTE * pCur)
+{
+	size_t offset = pCur - m_pBuffer;
+	if (offset == 0) return true;
+	if (*pCur < 128) return true;
+	if (m_pBufferMax == pCur) return true;
+	return false;
+}
+
+ISphTokenizer * CSphTokenizer_UTF8Space::Clone ( bool bEscaped ) const
+{
+	CSphTokenizer_UTF8Space * pClone = new CSphTokenizer_UTF8Space ();
+	pClone->CloneBase ( this, bEscaped );
+	return pClone;
 }
 
 #endif
