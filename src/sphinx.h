@@ -197,7 +197,7 @@ inline const	DWORD *	STATIC2DOCINFO ( const DWORD * pAttrs )	{ return STATIC2DOC
 #define SPHINX_TAG "-dev"
 #endif
 
-#define SPHINX_VERSION			"2.0.4" SPHINX_BITS_TAG SPHINX_TAG " (" SPH_SVN_TAGREV ")"
+#define SPHINX_VERSION			"2.0.6" SPHINX_BITS_TAG SPHINX_TAG " (" SPH_SVN_TAGREV ")"
 #define SPHINX_BANNER			"Sphinx " SPHINX_VERSION "\nCopyright (c) 2001-2012, Andrew Aksyonoff\nCopyright (c) 2008-2012, Sphinx Technologies Inc (http://sphinxsearch.com)\n\n"
 #define SPHINX_SEARCHD_PROTO	1
 
@@ -368,6 +368,7 @@ inline bool operator < ( const CSphRemapRange & a, const CSphRemapRange & b )
 /// lowercaser
 class CSphLowercaser
 {
+	friend class ISphTokenizer;
 public:
 				CSphLowercaser ();
 				~CSphLowercaser ();
@@ -644,6 +645,7 @@ struct CSphDictSettings
 
 /// abstract word dictionary interface
 struct CSphWordHit;
+class CSphAutofile;
 struct CSphDict
 {
 	/// virtualizing dtor
@@ -723,7 +725,7 @@ public:
 
 public:
 	/// begin creating dictionary file, setup any needed internal structures
-	virtual void			DictBegin ( int iTmpDictFD, int iDictFD, int iDictLimit );
+	virtual void			DictBegin ( CSphAutofile & tTempDict, CSphAutofile & tDict, int iDictLimit );
 
 	/// add next keyword entry to final dict
 	virtual void			DictEntry ( SphWordID_t uWordID, BYTE * sKeyword, int iDocs, int iHits, SphOffset_t iDoclistOffset, SphOffset_t iDoclistLength );
@@ -1246,12 +1248,11 @@ struct CSphSchema
 {
 	CSphString						m_sName;		///< my human-readable name
 	CSphVector<CSphColumnInfo>		m_dFields;		///< my fulltext-searchable fields
-	int								m_iBaseFields;	///< how much fields are base, how much are additional (only affects indexer)
 
 public:
 
 	/// ctor
-	explicit				CSphSchema ( const char * sName="(nameless)" ) : m_sName ( sName ), m_iBaseFields ( 0 ), m_iStaticSize ( 0 ) {}
+	explicit				CSphSchema ( const char * sName="(nameless)" ) : m_sName ( sName ), m_iStaticSize ( 0 ) {}
 
 	/// get field index by name
 	/// returns -1 if not found
@@ -1584,6 +1585,7 @@ public:
 	virtual void			SetDumpRows ( FILE * fpDumpRows ) { m_fpDumpRows = fpDumpRows; }
 
 	virtual SphRange_t		IterateFieldMVAStart ( int iAttr );
+	virtual bool			HasJoinedFields () { return m_iPlainFieldsLength!=m_tSchema.m_dFields.GetLength(); }
 
 protected:
 	int						ParseFieldMVA ( CSphVector < DWORD > & dMva, const char * szValue, bool bMva64 );
@@ -1603,6 +1605,7 @@ protected:
 	int						m_iMaxFileBufferSize;	///< max size of read buffer for the 'sql_file_field' fields
 	ESphOnFileFieldError	m_eOnFileFieldError;
 	FILE *					m_fpDumpRows;
+	int						m_iPlainFieldsLength;
 
 protected:
 	struct CSphBuildHitsState_t
@@ -1695,7 +1698,6 @@ struct CSphSource_SQL : CSphSource_Document
 	virtual void		PostIndex ();
 
 	virtual bool		HasAttrsConfigured () { return m_tParams.m_dAttrs.GetLength()!=0; }
-	virtual bool		HasJoinedFields () { return m_tSchema.m_iBaseFields!=m_tSchema.m_dFields.GetLength(); }
 
 	virtual ISphHits *	IterateJoinedHits ( CSphString & sError );
 
@@ -2110,12 +2112,12 @@ public:
 	ESphFilter			m_eType;		///< filter type
 	union
 	{
-		SphAttr_t		m_uMinValue;	///< range min
+		SphAttr_t		m_iMinValue;	///< range min
 		float			m_fMinValue;	///< range min
 	};
 	union
 	{
-		SphAttr_t		m_uMaxValue;	///< range max
+		SphAttr_t		m_iMaxValue;	///< range max
 		float			m_fMaxValue;	///< range max
 	};
 	CSphVector<SphAttr_t>	m_dValues;		///< integer values set
@@ -2503,6 +2505,9 @@ public:
 	/// check if this sorter needs attr values
 	virtual bool		UsesAttrs () const = 0;
 
+	// check if sorter might be used in multi-queue
+	virtual bool		CanMulti () const = 0;
+
 	/// check if this sorter does groupby
 	virtual bool		IsGroupby () const = 0;
 
@@ -2710,7 +2715,9 @@ public:
 	virtual int					DebugCheck ( FILE * fp ) = 0;
 
 	/// getter for name
-	const char * GetName () { return m_sIndexName.cstr(); }
+	const char *				GetName () { return m_sIndexName.cstr(); }
+
+	void						SetName ( const char * sName ) { m_sIndexName = sName; }
 
 public:
 	int64_t						m_iTID;
