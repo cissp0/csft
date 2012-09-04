@@ -42,7 +42,23 @@ public:
 	virtual void			GetLocator ( CSphAttrLocator & tOut ) const = 0;
 	virtual ESphAttr		GetResultType () const = 0;
 	virtual void			SetStringPool ( const BYTE * ) {}
+	virtual bool			CanMulti () const { return true; }
 };
+
+
+static bool HasString ( const CSphMatchComparatorState * pState )
+{
+	assert ( pState );
+
+	for ( int i=0; i<CSphMatchComparatorState::MAX_ATTRS; i++ )
+	{
+		if ( pState->m_eKeypart[i]==SPH_KEYPART_STRING )
+			return true;
+	}
+
+	return false;
+}
+
 
 
 /// match-sorting priority queue traits
@@ -81,6 +97,11 @@ public:
 	bool		UsesAttrs () const										{ return m_bUsesAttrs; }
 	virtual CSphMatch *	Finalize ()												{ return m_pData; }
 	virtual int			GetLength () const										{ return m_iUsed; }
+
+	virtual bool CanMulti () const
+	{
+		return !HasString ( &m_tState );
+	}
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -314,7 +335,8 @@ static bool IsGroupbyMagic ( const CSphString & s )
 #define GROUPER_BEGIN_SPLIT(_name) \
 	GROUPER_BEGIN(_name) \
 	time_t tStamp = (time_t)uValue; \
-	struct tm * pSplit = localtime ( &tStamp );
+	struct tm tSplit; \
+	localtime_r ( &tStamp, &tSplit );
 
 
 GROUPER_BEGIN ( CSphGrouperAttr )
@@ -323,13 +345,13 @@ GROUPER_END
 
 
 GROUPER_BEGIN_SPLIT ( CSphGrouperDay )
-	return (pSplit->tm_year+1900)*10000 + (1+pSplit->tm_mon)*100 + pSplit->tm_mday;
+	return (tSplit.tm_year+1900)*10000 + (1+tSplit.tm_mon)*100 + tSplit.tm_mday;
 GROUPER_END
 
 
 GROUPER_BEGIN_SPLIT ( CSphGrouperWeek )
-	int iPrevSunday = (1+pSplit->tm_yday) - pSplit->tm_wday; // prev Sunday day of year, base 1
-	int iYear = pSplit->tm_year+1900;
+	int iPrevSunday = (1+tSplit.tm_yday) - tSplit.tm_wday; // prev Sunday day of year, base 1
+	int iYear = tSplit.tm_year+1900;
 	if ( iPrevSunday<=0 ) // check if we crossed year boundary
 	{
 		// adjust day and year
@@ -345,12 +367,12 @@ GROUPER_END
 
 
 GROUPER_BEGIN_SPLIT ( CSphGrouperMonth )
-	return (pSplit->tm_year+1900)*100 + (1+pSplit->tm_mon);
+	return (tSplit.tm_year+1900)*100 + (1+tSplit.tm_mon);
 GROUPER_END
 
 
 GROUPER_BEGIN_SPLIT ( CSphGrouperYear )
-	return (pSplit->tm_year+1900);
+	return (tSplit.tm_year+1900);
 GROUPER_END
 
 template <class PRED>
@@ -390,6 +412,8 @@ public:
 	{
 		m_pStringBase = pStrings;
 	}
+
+	virtual bool CanMulti () const { return false; }
 };
 
 
@@ -1019,6 +1043,20 @@ public:
 		return true;
 	}
 
+	virtual bool CanMulti () const
+	{
+		if ( m_pGrouper && !m_pGrouper->CanMulti() )
+			return false;
+
+		if ( HasString ( &m_tState ) )
+			return false;
+
+		if ( HasString ( &m_tGroupSorter ) )
+			return false;
+
+		return true;
+	}
+
 	/// set string pool pointer (for string+groupby sorters)
 	void SetStringPool ( const BYTE * pStrings )
 	{
@@ -1329,8 +1367,8 @@ public:
 			assert ( ( iValues%2 )==0 );
 			for ( ;iValues>0; iValues-=2, pValues+=2 )
 			{
-				uint64_t uMva = MVA_UPSIZE ( pValues );
-				SphGroupKey_t uGroupkey = this->m_pGrouper->KeyFromValue ( uMva );
+				int64_t iMva = MVA_UPSIZE ( pValues );
+				SphGroupKey_t uGroupkey = this->m_pGrouper->KeyFromValue ( iMva );
 				bRes |= this->PushEx ( tEntry, uGroupkey, false );
 			}
 
@@ -1860,6 +1898,8 @@ static ESortClauseParseResult sphParseSortClause ( const CSphQuery * pQuery, con
 						continue;
 					if ( tItem.m_sExpr.Begins("@") )
 						iAttr = tSchema.GetAttrIndex ( tItem.m_sExpr.cstr() );
+					else if ( tItem.m_sExpr=="count(*)" )
+						iAttr = tSchema.GetAttrIndex ( "@count" );
 					break; // break in any case; because we did match the alias
 				}
 			}
@@ -2076,9 +2116,12 @@ static bool SetupGroupbySettings ( const CSphQuery * pQuery, const CSphSchema & 
 		case SPH_GROUPBY_ATTR:
 		{
 			if ( eType!=SPH_ATTR_STRING )
+			{
 				tSettings.m_pGrouper = new CSphGrouperAttr ( tLoc );
-			else
+			} else
+			{
 				tSettings.m_pGrouper = sphCreateGrouperString ( tLoc, pQuery->m_eCollation );
+			}
 		}
 		break;
 		default:
@@ -2086,8 +2129,8 @@ static bool SetupGroupbySettings ( const CSphQuery * pQuery, const CSphSchema & 
 			return false;
 	}
 
-	tSettings.m_bMVA = ( eType==SPH_ATTR_UINT32SET || eType==SPH_ATTR_UINT64SET );
-	tSettings.m_bMva64 = ( eType==SPH_ATTR_UINT64SET );
+	tSettings.m_bMVA = ( eType==SPH_ATTR_UINT32SET || eType==SPH_ATTR_INT64SET );
+	tSettings.m_bMva64 = ( eType==SPH_ATTR_INT64SET );
 
 	// setup distinct attr
 	if ( !pQuery->m_sGroupDistinct.IsEmpty() )
@@ -2718,16 +2761,28 @@ ISphMatchSorter * sphCreateQueue ( const CSphQuery * pQuery, const CSphSchema & 
 		bool bIsCount = IsCount(sExpr);
 		bHasCount |= bIsCount;
 
-		if ( bIsCount && sExpr.cstr()[0]!='@' )
-		{
-			CSphString & sExprW = const_cast < CSphString & > ( sExpr );
-			sExprW = "@count";
-		}
-
 		// for now, just always pass "plain" attrs from index to sorter; they will be filtered on searchd level
-		if ( sExpr=="*"
-			|| ( tSchema.GetAttrIndex ( sExpr.cstr() )>=0 && tItem.m_eAggrFunc==SPH_AGGR_NONE )
-			|| IsGroupby(sExpr) || bIsCount )
+		int iAttrIdx = tSchema.GetAttrIndex ( sExpr.cstr() );
+		bool bPlainAttr = ( ( sExpr=="*" || ( iAttrIdx>=0 && tItem.m_eAggrFunc==SPH_AGGR_NONE ) ) &&
+							( tItem.m_sAlias.IsEmpty() || tItem.m_sAlias==tItem.m_sExpr ) );
+		// handling cases like SELECT 1+2 AS strattr, strattr FROM idx;
+		// we should see 3 in second column, not an attribute value
+		if ( !bPlainAttr && iAttrIdx>=0 &&
+			( tSchema.GetAttr ( iAttrIdx ).m_eAttrType==SPH_ATTR_STRING
+			|| tSchema.GetAttr ( iAttrIdx ).m_eAttrType==SPH_ATTR_UINT32SET
+			|| tSchema.GetAttr ( iAttrIdx ).m_eAttrType==SPH_ATTR_INT64SET ) )
+		{
+			bPlainAttr = true;
+			for ( int i=0; i<iItem; i++ )
+			{
+				if ( sExpr==pQuery->m_dItems[i].m_sAlias )
+				{
+					bPlainAttr = false;
+					break;
+				}
+			}
+		}
+		if ( bPlainAttr || IsGroupby(sExpr) || bIsCount )
 		{
 			continue;
 		}
@@ -2870,7 +2925,10 @@ ISphMatchSorter * sphCreateQueue ( const CSphQuery * pQuery, const CSphSchema & 
 	// now lets add @groupby etc if needed
 	if ( bGotGroupby && tSorterSchema.GetAttrIndex ( "@groupby" )<0 )
 	{
-		CSphColumnInfo tGroupby ( "@groupby", tSettings.m_pGrouper->GetResultType() );
+		ESphAttr eGroupByResult = tSettings.m_pGrouper->GetResultType();
+		if ( tSettings.m_bMva64 )
+			eGroupByResult = SPH_ATTR_BIGINT;
+		CSphColumnInfo tGroupby ( "@groupby", eGroupByResult );
 		CSphColumnInfo tCount ( "@count", SPH_ATTR_INTEGER );
 		CSphColumnInfo tDistinct ( "@distinct", SPH_ATTR_INTEGER );
 
@@ -3016,11 +3074,22 @@ ISphMatchSorter * sphCreateQueue ( const CSphQuery * pQuery, const CSphSchema & 
 				sError.SetSprintf ( "groups can not be sorted by @random" );
 			return NULL;
 		}
-		int idx = tSorterSchema.GetAttrIndex ( pQuery->m_sGroupBy.cstr() );
-		if ( pExtra )
-			pExtra->AddAttr ( tSorterSchema.GetAttr ( idx ), true );
 
-		FixupDependency ( tSorterSchema, &idx, 1 );
+		enum { E_CREATE_GROUP_BY = 0, E_CREATE_DISTINCT = 1, E_CREATE_COUNT = 2 };
+		int dGroupAttrs[E_CREATE_COUNT];
+		dGroupAttrs[E_CREATE_GROUP_BY] = tSorterSchema.GetAttrIndex ( pQuery->m_sGroupBy.cstr() );
+		if ( pExtra )
+			pExtra->AddAttr ( tSorterSchema.GetAttr ( dGroupAttrs[E_CREATE_GROUP_BY] ), true );
+
+		if ( bGotDistinct )
+		{
+			dGroupAttrs[E_CREATE_DISTINCT] = tSorterSchema.GetAttrIndex ( pQuery->m_sGroupDistinct.cstr() );
+			if ( pExtra )
+				pExtra->AddAttr ( tSorterSchema.GetAttr ( dGroupAttrs[E_CREATE_DISTINCT] ), true );
+		}
+
+		int iGropAttrsCount = ( bGotDistinct ? 2 : 1 );
+		FixupDependency ( tSorterSchema, dGroupAttrs, iGropAttrsCount );
 		FixupDependency ( tSorterSchema, dAttrs, CSphMatchComparatorState::MAX_ATTRS );
 
 		// GroupSortBy str attributes setup
