@@ -1028,7 +1028,7 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 				// convert docid
 				if(pDocId && PyLong_Check(pDocId)) {
 #if USE_64BIT
-					m_tDocInfo.m_iDocID  =  PyLong_AsLongLong(pDocId);
+					m_tDocInfo.m_iDocID  =  PyLong_AsUnsignedLongLong(pDocId);
 #else
 					m_tDocInfo.m_iDocID = (SphDocID_t)(PyLong_AsLong(pDocId));
 #endif
@@ -1046,7 +1046,7 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 				*/
 				
 				m_dMva.Resize ( 0 );
-				uint64_t d64Val = 0;
+				int64_t d64Val = 0;
 				DWORD dVal  = 0;
 				if(PyInt_Check(py_var)) 
 				{
@@ -1055,7 +1055,7 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 				}
 				if(PyLong_Check(py_var)) 
 				{
-					d64Val = (uint64_t)(PyInt_AsUnsignedLongLongMask(py_var));
+					d64Val = (int64_t)(PyLong_AsLongLong(py_var));
 					dVal = (DWORD)d64Val; //might overflow, but never mind.
 				}
 
@@ -1360,6 +1360,8 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 		m_dFields[i] = NULL;
 	}
 
+	m_tDocInfo.Reset ( m_tSchema.GetRowSize() );
+
 	if(m_Doc_id_col.IsEmpty()) 
 		return NULL; //no init yet!
 
@@ -1432,7 +1434,7 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 
 		if(pDocId && PyLong_Check(pDocId)) {
 #if USE_64BIT
-			m_tDocInfo.m_iDocID  =  PyLong_AsLongLong(pDocId);
+			m_tDocInfo.m_iDocID  =  PyLong_AsUnsignedLongLong(pDocId);
 #else
 			m_tDocInfo.m_iDocID = (SphDocID_t)(PyLong_AsLong(pDocId));
 #endif
@@ -1718,7 +1720,7 @@ ISphHits * CSphSource_Python::IterateJoinedHits ( CSphString & sError){
 						// convert docid
 						if(pDocId && PyLong_Check(pDocId)) {
 #if USE_64BIT
-							m_tDocInfo.m_iDocID  =  PyLong_AsLongLong(pDocId);
+							m_tDocInfo.m_iDocID  =  PyLong_AsUnsignedLongLong(pDocId);
 #else
 							m_tDocInfo.m_iDocID = (SphDocID_t)(PyLong_AsLong(pDocId));
 #endif
@@ -1909,6 +1911,9 @@ int CSphSource_Python::SetAttr( int iIndex, PyObject* v)
 	switch(tAttr.m_eAttrType){
 		case SPH_ATTR_FLOAT:   {
 			double dVal = 0.0;
+			if( item == Py_None) {
+				m_tDocInfo.SetAttr ( tAttr.m_tLocator, dVal);
+			}
 			if(item && PyFloat_Check(item))
 				dVal = PyFloat_AsDouble(item);
 			m_tDocInfo.SetAttrFloat ( tAttr.m_tLocator, (float)dVal);
@@ -1919,6 +1924,9 @@ int CSphSource_Python::SetAttr( int iIndex, PyObject* v)
 		case SPH_ATTR_INTEGER:
 		case  SPH_ATTR_BIGINT:{
 			PY_LONG_LONG dVal =  0;
+           if( item == Py_None) {
+				m_tDocInfo.SetAttr ( tAttr.m_tLocator, dVal);
+			}
 			if(item && PyInt_Check(item)) {
 				dVal =  PyInt_AsLong(item);
 				m_tDocInfo.SetAttr ( tAttr.m_tLocator,(DWORD)dVal);
@@ -1940,6 +1948,9 @@ int CSphSource_Python::SetAttr( int iIndex, PyObject* v)
 		case SPH_ATTR_TIMESTAMP: {
 			//time stamp can be float and long
 			PY_LONG_LONG dVal = 0;
+           if( item == Py_None) {
+				m_tDocInfo.SetAttr ( tAttr.m_tLocator, dVal);
+			}
 			if(item && PyLong_Check(item))
 				dVal = PyLong_AsLongLong(item);
 			if(item && PyFloat_Check(item))
@@ -2126,7 +2137,7 @@ bool	CSphSource_Python::IterateKillListNext ( SphDocID_t & aID)
 	if(PyLong_Check(item)){
 
 #if USE_64BIT
-		aID  =  PyLong_AsLongLong(item);
+		aID  =  PyLong_AsUnsignedLongLong(item);
 #else
 		aID = (SphDocID_t)(PyLong_AsLong(item));
 #endif
