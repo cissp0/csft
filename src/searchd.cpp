@@ -7000,7 +7000,7 @@ void SearchHandler_c::RunSubset ( int iStart, int iEnd )
 
 			ARRAY_FOREACH ( i, m_dLocal )
 				//
-				if ( g_hDistIndexes.Exists ( m_dLocal[i].m_sName ) )
+				if ( g_hDistIndexes.Exists ( m_dLocal[i]) )
 				{
 					iDistFound = i;
 					break;
