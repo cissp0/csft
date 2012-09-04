@@ -206,13 +206,13 @@ void			sphMemStatMMapDel ( int64_t iSize );
 #undef new
 #define new		new(__FILE__,__LINE__)
 
-#endif // SPH_DEBUG_LEAKS || SPH_ALLOCS_PROFILER
-
 /// delete for my new
 void			operator delete ( void * pPtr ) throw();
 
 /// delete for my new
 void			operator delete [] ( void * pPtr ) throw();
+
+#endif // SPH_DEBUG_LEAKS || SPH_ALLOCS_PROFILER
 
 /////////////////////////////////////////////////////////////////////////////
 // HELPERS
