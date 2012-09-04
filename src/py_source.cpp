@@ -701,8 +701,6 @@ bool	CSphSource_Python::Connect ( CSphString & sError ){
 			if(InitDataSchema_Python(sError) != 0)
 				return false;
 
-			// build the cache.
-			m_tSchema.BuildFieldIndexCache();
 		}
 	}
 	return true;
@@ -832,11 +830,11 @@ DONE:
 			int iSize = (int)PyList_Size(pResult);
 			if(iSize>=1) { //must have at least one element
 				PyObject* pResult2 = PyList_GetItem(pResult,0); //borrow
-				m_tSchema.m_iBaseFields = 0;
+				m_iPlainFieldsLength = 0;
 
 				if (PyTuple_Check(pResult2)) {
 
-					m_tSchema.m_iBaseFields = (int)PyTuple_Size(pResult2); //the base fields.
+					m_iPlainFieldsLength = (int)PyTuple_Size(pResult2); //the base fields.
 #if HAVE_SSIZE_T
 					for(Py_ssize_t  iField = 0; iField< PyTuple_Size(pResult2); iField++)
 #else
@@ -941,7 +939,7 @@ bool	CSphSource_Python::IterateMultivaluedStart ( int iAttr, CSphString & sError
 	m_iMultiAttr = iAttr;
 	const CSphColumnInfo & tAttr = m_tSchema.GetAttr(iAttr);
 
-	if ( !(tAttr.m_eAttrType==SPH_ATTR_UINT32SET || tAttr.m_eAttrType==SPH_ATTR_UINT64SET ) )
+	if ( !(tAttr.m_eAttrType==SPH_ATTR_UINT32SET || tAttr.m_eAttrType==SPH_ATTR_INT64SET ) )
 		return false;
 
 	switch ( tAttr.m_eSrc )
@@ -980,7 +978,7 @@ bool	CSphSource_Python::IterateMultivaluedStart ( int iAttr, CSphString & sError
 bool	CSphSource_Python::IterateMultivaluedNext ()
 {	
 	const CSphColumnInfo & tAttr = m_tSchema.GetAttr ( m_iMultiAttr );
-	assert ( tAttr.m_eAttrType==SPH_ATTR_UINT32SET || tAttr.m_eAttrType==SPH_ATTR_UINT64SET );
+	assert ( tAttr.m_eAttrType==SPH_ATTR_UINT32SET || tAttr.m_eAttrType==SPH_ATTR_INT64SET );
 	
 	//m_iMultiAttr
 	if(m_pInstance_GetMVAValue)
@@ -1518,7 +1516,7 @@ DONE:
 					int uOff = 0;
 					if ( tAttr.m_eSrc==SPH_ATTRSRC_FIELD )
 					{
-						uOff = ParseFieldMVA ( m_dMva, pList, tAttr.m_eAttrType==SPH_ATTR_UINT64SET );
+						uOff = ParseFieldMVA ( m_dMva, pList, tAttr.m_eAttrType==SPH_ATTR_INT64SET );
 					}
 					m_tDocInfo.SetAttr ( tAttr.m_tLocator, uOff );
 					//continue;

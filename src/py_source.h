@@ -57,7 +57,7 @@ public:
 
 	/// append to support joined field.
 	virtual ISphHits *	IterateJoinedHits ( CSphString & );
-	virtual bool		HasJoinedFields () { return m_tSchema.m_iBaseFields!=m_tSchema.m_dFields.GetLength(); }
+	//virtual bool		HasJoinedFields () { return m_tSchema.m_iBaseFields!=m_tSchema.m_dFields.GetLength(); }
 
 
 	virtual bool	IterateKillListStart ( CSphString & );
