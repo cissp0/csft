@@ -106,6 +106,9 @@ typedef SmallStringHash_T < CSphConfigSection >	CSphConfigType;
 /// config (hash of section types)
 typedef SmallStringHash_T < CSphConfigType >	CSphConfig;
 
+// coreseek
+class CSphPostgreSqlConfigReader;
+
 /// simple config file
 class CSphConfigParser
 {
@@ -114,6 +117,7 @@ public:
 
 public:
 					CSphConfigParser ();
+					~CSphConfigParser ();
 	bool			Parse ( const char * sFileName, const char * pBuffer = NULL );
 
 	// fail-save loading new config over existing.
@@ -128,6 +132,8 @@ protected:
 
 	int					m_iWarnings;
 	static const int	WARNS_THRESH	= 5;
+	
+	CSphPostgreSqlConfigReader* m_pgReader;
 
 protected:
 	bool			IsPlainSection ( const char * sKey );
@@ -135,6 +141,8 @@ protected:
 	bool			AddSection ( const char * sType, const char * sSection );
 	void			AddKey ( const char * sKey, char * sValue );
 	bool			ValidateKey ( const char * sKey );
+
+	void			Parsed();
 
 #if !USE_WINDOWS
 	bool			TryToExec ( char * pBuffer, char * pEnd, const char * szFilename, CSphVector<char> & dResult );

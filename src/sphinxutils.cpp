@@ -321,20 +321,239 @@ static KeyDesc_t g_dKeysSearchd[] =
 	{ NULL,						0, NULL }
 };
 
+
+// -- coreseek -- pgconf
+static KeyDesc_t g_dKeysPostgresql[] = 
+{
+	{ "sql_host",				0, NULL },
+	{ "sql_user",				0, NULL },
+	{ "sql_pass",				0, NULL },
+	{ "sql_db",					0, NULL },
+	{ "sql_client_encoding",    0, NULL },
+	{ "sql_port",				0, NULL },
+	{ "name",					0, NULL },
+	{ "debug",					0, NULL },
+	{ NULL,						0, NULL }
+};
+
+//////////////////////////////////////////////////////////////////////////
+class CSphPostgreSqlConfigReader{
+public:
+	CSphPostgreSqlConfigReader():m_tPgDriver(NULL), m_pPgResult(NULL) {};
+	
+	// connect to postgresql data base
+	int Connect(CSphConfigSection & aSec);
+	// close the connection and free memeory.
+	void Disconnect();
+	// check is connected or not
+	bool IsConnected();
+	int FillSphinxConfig(CSphConfigParser* aParser);
+
+protected:
+
+#if USE_PGSQL
+	CSphSourceParams_PgSQL			m_tParams;
+#endif
+
+	CSphString						m_sPgClientEncoding;
+	CSphString						m_sName;
+	int								m_iDebug;
+
+#if USE_PGSQL
+protected:
+	PGresult * 				m_pPgResult;	///< postgresql execution restult context
+	PGconn *				m_tPgDriver;	///< postgresql connection context
+
+	void SqlDismissResult ();
+	int SqlNumFields ();
+	
+	const char * SqlColumn ( int iPgRow, int iIndex );
+	const char * SqlFieldName ( int iIndex );
+#endif
+};
+
+#if USE_PGSQL
+int CSphPostgreSqlConfigReader::Connect(CSphConfigSection & aSec)
+{
+	{
+		m_tParams.m_sHost = aSec.GetStr("sql_host", "localhost");
+		m_tParams.m_sUser = aSec.GetStr("sql_user", "postgres");
+		m_tParams.m_sPass = aSec.GetStr("sql_pass", "");
+		m_tParams.m_sDB = aSec.GetStr("sql_db", "sphinx");
+		m_tParams.m_iPort = aSec.GetInt("sql_port", 5432);
+		
+		m_tParams.m_sClientEncoding = aSec.GetStr("sql_client_encoding", "");
+		
+		m_sPgClientEncoding = m_tParams.m_sClientEncoding;
+		if ( !m_sPgClientEncoding.cstr() )
+			m_sPgClientEncoding = "";
+
+		m_iDebug = aSec.GetInt("debug", 0);
+		m_sName =  aSec.GetStr("name", "test");
+		m_tParams.m_bPrintQueries = ( m_iDebug > 1 );
+
+	}
+	
+	char sPort[64];
+	snprintf ( sPort, sizeof(sPort), "%d", m_tParams.m_iPort );
+	m_tPgDriver = PQsetdbLogin ( m_tParams.m_sHost.cstr(), sPort, NULL, NULL,
+		m_tParams.m_sDB.cstr(), m_tParams.m_sUser.cstr(), m_tParams.m_sPass.cstr() );
+	
+	if ( PQstatus ( m_tPgDriver )==CONNECTION_BAD )
+	{
+		if ( m_tParams.m_bPrintQueries )
+			fprintf ( stdout, "SQL-CONNECT: FAIL\n" );
+		return false;
+	}
+	
+	// set client encoding
+	if ( !m_sPgClientEncoding.IsEmpty() )
+		if ( -1==PQsetClientEncoding ( m_tPgDriver, m_sPgClientEncoding.cstr() ) )
+	{
+		Disconnect ();
+		if ( m_tParams.m_bPrintQueries )
+			fprintf ( stdout, "SQL-CONNECT: FAIL\n" );
+		return false;
+	}
+
+	if ( m_tParams.m_bPrintQueries )
+		fprintf ( stdout, "SQL-CONNECT: ok\n" );
+	/*
+		- get the instance id
+			= list all source
+			= list all indexer
+				* list the attributes.
+	 */
+	{
+		char sBuf [ 1024 ];
+		snprintf ( sBuf, sizeof(sBuf), "SELECT id FROM __sphx_instance WHERE name='%s'", m_sName.cstr());
+
+		m_pPgResult = PQexec ( m_tPgDriver, sBuf );
+
+		ExecStatusType eRes = PQresultStatus ( m_pPgResult );
+		if ( ( eRes!=PGRES_COMMAND_OK ) && ( eRes!=PGRES_TUPLES_OK ) )
+		{
+			if ( m_tParams.m_bPrintQueries )
+				fprintf ( stdout, "SQL-QUERY: %s: FAIL\n", sBuf );
+			return false;
+		}
+		if ( m_tParams.m_bPrintQueries )
+			fprintf ( stdout, "SQL-QUERY: %s: ok\n", sBuf );
+
+		int iPgRows = PQntuples ( m_pPgResult );
+		// check the row count
+		if (iPgRows == 0) {
+			fprintf ( stdout, "SQL-QUERY: %s: instance[%s] not found.\n", sBuf , m_sName.cstr() );
+			return false;
+		}
+	}
+	return true;
+}
+
+void CSphPostgreSqlConfigReader::Disconnect ()
+{
+	if ( m_tParams.m_bPrintQueries )
+		fprintf ( stdout, "SQL-DISCONNECT\n" );
+
+	PQfinish ( m_tPgDriver );
+}
+
+bool CSphPostgreSqlConfigReader::IsConnected()
+{
+	return (m_tPgDriver!=NULL);
+}
+
+int CSphPostgreSqlConfigReader::FillSphinxConfig(CSphConfigParser* aParser)
+{
+	// check searchd & indexer.
+	/*
+		1 get the section
+		2 check the existance.
+
+	 */
+	if ( ! aParser ->m_tConf.Exists("searchd" )) {
+		printf("ccc");	
+	}
+	return 0;
+}
+
+////////////////////////
+void CSphPostgreSqlConfigReader::SqlDismissResult ()
+{
+	if ( !m_pPgResult )
+		return;
+
+	PQclear ( m_pPgResult );
+	m_pPgResult = NULL;
+}
+
+
+int CSphPostgreSqlConfigReader::SqlNumFields ()
+{
+	if ( !m_pPgResult )
+		return -1;
+
+	return PQnfields ( m_pPgResult );
+}
+
+
+const char * CSphPostgreSqlConfigReader::SqlColumn ( int iPgRow, int iIndex )
+{
+	if ( !m_pPgResult )
+		return NULL;
+
+	const char * szValue = PQgetvalue ( m_pPgResult, iPgRow, iIndex );
+	//if ( m_dIsColumnBool.GetLength() && m_dIsColumnBool[iIndex] && szValue[0]=='t' && !szValue[1] )
+	//	return "1";
+
+	return szValue;
+}
+
+
+const char * CSphPostgreSqlConfigReader::SqlFieldName ( int iIndex )
+{
+	if ( !m_pPgResult )
+		return NULL;
+
+	return PQfname ( m_pPgResult, iIndex );
+}
+
+#else
+int CSphPostgreSqlConfigReader::Connect(CSphConfigSection & ) { return 0; }
+
+void CSphPostgreSqlConfigReader::Disconnect() {}
+
+bool CSphPostgreSqlConfigReader::IsConnected() {	return true; }
+
+int CSphPostgreSqlConfigReader::FillSphinxConfig(CSphConfigParser* ) {	return 0; }
+#endif
+
 //////////////////////////////////////////////////////////////////////////
 
 CSphConfigParser::CSphConfigParser ()
 	: m_sFileName ( "" )
 	, m_iLine ( -1 )
 {
+	m_pgReader = NULL;
 }
 
+CSphConfigParser::~CSphConfigParser (){
+	if(m_pgReader)
+		delete m_pgReader;
+	m_pgReader = NULL;
+}
 
 bool CSphConfigParser::IsPlainSection ( const char * sKey )
 {
 	if ( !strcasecmp ( sKey, "indexer" ) )		return true;
 	if ( !strcasecmp ( sKey, "searchd" ) )		return true;
 	if ( !strcasecmp ( sKey, "search" ) )		return true;
+	if ( !strcasecmp ( sKey, "postgres" ) )		return true; //-coreseek -postgres
+	/*
+		postgresql section can exten config via database...
+			= all the origin sphinx config section are ok.
+			= index | source | indexer | searchd  can be setting both in db & file, file is the 1st..
+	 */
 	return false;
 }
 
@@ -361,10 +580,27 @@ bool CSphConfigParser::AddSection ( const char * sType, const char * sName )
 		return false;
 	}
 	m_tConf[m_sSectionType].Add ( CSphConfigSection(), m_sSectionName ); // FIXME! be paranoid, verify that it returned true
-
+	
+	// create the object and wait config keys.
+	if(strcasecmp(sType, "postgres") == 0) {
+		m_pgReader  = new CSphPostgreSqlConfigReader();
+	}
 	return true;
 }
 
+void CSphConfigParser::Parsed()
+{
+	if(m_pgReader) {
+		//if not filled the info. do it now.
+		CSphConfigSection & tSec = m_tConf["postgres"]["postgres"];
+		if(!m_pgReader->IsConnected()) {
+			if(m_pgReader->Connect(tSec)) {
+				m_pgReader->FillSphinxConfig(this);
+				m_pgReader->Disconnect();
+			}
+		}
+	}
+}
 
 void CSphConfigParser::AddKey ( const char * sKey, char * sValue )
 {
@@ -408,6 +644,7 @@ bool CSphConfigParser::ValidateKey ( const char * sKey )
 	else if ( m_sSectionType=="index" )		pDesc = g_dKeysIndex;
 	else if ( m_sSectionType=="indexer" )	pDesc = g_dKeysIndexer;
 	else if ( m_sSectionType=="searchd" )	pDesc = g_dKeysSearchd;
+	else if ( m_sSectionType=="postgres" )	pDesc = g_dKeysPostgresql; // -coreseek -postgres
 	if ( !pDesc )
 	{
 		snprintf ( m_sError, sizeof(m_sError), "unknown section type '%s'", m_sSectionType.cstr() );
@@ -840,7 +1077,7 @@ bool CSphConfigParser::Parse ( const char * sFileName, const char * pBuffer )
 		fprintf ( stdout, "ERROR: %s in %s line %d col %d.\n", m_sError, m_sFileName.cstr(), m_iLine, iCol );
 		return false;
 	}
-
+	Parsed();
 	return true;
 }
 
