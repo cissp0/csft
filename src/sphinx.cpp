@@ -2178,7 +2178,7 @@ public:
 
 	virtual ISphTokenizer *		Clone ( bool bEscaped ) const;
 
-	void setDictPath(const char* path) {	m_dictpath = path; }
+	virtual void setDictPath(const char* path) {	m_dictpath = path; }
 public:
 	virtual const BYTE*				GetThesaurus(BYTE * sBuffer, int iLength );
 
@@ -2218,17 +2218,38 @@ protected:
 
 };
 
+#include "zhelpers.hpp"
 
 class CSphTokenizer_UTF8ZeroMQ:public CSphTokenizer_UTF8MMSeg
 {
 
 public:
+	CSphTokenizer_UTF8ZeroMQ ();
+	~CSphTokenizer_UTF8ZeroMQ () {
+	  if(m_requester)
+	  	delete m_requester;
+	  if(m_context)
+	  	delete m_context;
+	};
 	virtual void				SetBuffer ( BYTE * sBuffer, int iLength );
 	virtual ISphTokenizer *		Clone ( bool bEscaped ) const;
+	
+	virtual void setDictPath(const char* path) {
+		//m_dictpath = path; 
+		if(m_requester)
+			m_requester->connect(path);
+	}
+
+
 
 protected:
 	virtual bool				IsSegment(const BYTE * pCur);
-
+	
+	zmq::context_t* m_context;
+	
+	zmq::socket_t* m_requester;
+	
+	std::vector<bool> m_result; // the tokenizer result, refer by std::bitset.
 };
 
 #endif
@@ -5004,13 +5025,70 @@ ISphTokenizer * CSphTokenizer_UTF8Space::Clone ( bool bEscaped ) const
 
 ///////////////////////////////////////////////////////////////////////
 
+CSphTokenizer_UTF8ZeroMQ::CSphTokenizer_UTF8ZeroMQ ()
+		:CSphTokenizer_UTF8MMSeg()
+		,m_context(NULL)
+		,m_requester(NULL)
+{
+	m_dictpath = NULL;
+	//FIXCJK
+	CSphVector<CSphRemapRange> dRemaps;
+	/*
+		
+	*/
+	dRemaps.Add ( CSphRemapRange ( 0x4e00, 0x9fff, 0x4e00 ) );
+	dRemaps.Add ( CSphRemapRange ( 0xFF00, 0xFFFF, 0xFF00 ) );
+	dRemaps.Add ( CSphRemapRange ( 0x3000, 0x303F, 0x3000 ) );
+		
+	m_tLC.AddRemaps ( dRemaps,
+		FLAG_CODEPOINT_NGRAM | FLAG_CODEPOINT_SPECIAL ); // !COMMIT support other n-gram lengths than 1
+	//ENDCJK
+	this->m_pAccumSeg = m_sAccumSeg;
+	m_iLastTokenBufferLen = 0;
+	m_iLastTokenLenMMSeg = 0;	
+	
+	//zmq related
+	m_context = new zmq::context_t(1);
+
+	m_requester = new zmq::socket_t(*m_context, ZMQ_REQ);
+
+}
+
+
 void CSphTokenizer_UTF8ZeroMQ::SetBuffer ( BYTE * sBuffer, int iLength )
 {
 	CSphTokenizer_UTF8::SetBuffer(sBuffer, iLength);
 	m_segoffset = 0;
 	m_segToken = (char*)m_pCur;
-	printf("call set buffer");
-	exit(0);
+	
+	// resize
+	m_result.resize(iLength);
+	
+	// make the req.
+	//printf("call set buffer");
+	//exit(0);
+	// sent 
+	{
+	    uint32_t head = 'S'+ (iLength << 8);
+	    zmq::message_t message(iLength+4);
+	    memcpy(message.data(), &head, 4);
+    	    memcpy(message.data()+4, sBuffer, iLength);
+            bool rc = m_requester->send(message);
+	}
+	// recv
+	{
+	    zmq::message_t message;
+    	    m_requester->recv(&message);
+	    // FIXME: should check the return value.
+	    uint32_t* pos = ( uint32_t*)(message.data() + 0);
+	    for(int i = 1; i< message.size()/4; i++)
+	    {
+	    	//printf("offset=%d\n", pos[i]);
+		m_result[pos[i]] = 1;
+	    }
+            //return std::string(static_cast<char*>(message.data()), message.size());
+	}
+	//exit(0);
 }
 
 bool CSphTokenizer_UTF8ZeroMQ::IsSegment(const BYTE * pCur)
@@ -5018,7 +5096,8 @@ bool CSphTokenizer_UTF8ZeroMQ::IsSegment(const BYTE * pCur)
 	size_t offset = pCur - m_pBuffer;
 	if (offset == 0) return true;
 	if (*pCur < 128) return true;
-	if (m_pBufferMax == pCur) return true;
+	if (m_result[offset]) return true;
+	//if (m_pBufferMax == pCur) return true;
 	return false;
 }
 

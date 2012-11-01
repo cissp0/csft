@@ -324,7 +324,7 @@ then
 	do
 		if test [ -n "$CANDIDATE" -a -d "$CANDIDATE" ]
 		then
-			MMSEG_LIBS="-L$CANDIDATE -lmmseg"
+			MMSEG_LIBS="-L$CANDIDATE -lmmseg -lzmq"
 			break
 		fi
 	done
@@ -351,7 +351,7 @@ then
 	# Trim trailing '.libs' if user passed it in --with-mysql-libs option
 	ac_cv_mmseg_libs=`echo ${ac_cv_mmseg_libs} | sed -e 's/.libs$//' \
 		-e 's+.libs/$++'`
-	MMSEG_LIBS="-L$ac_cv_mmseg_libs -lmmseg"
+	MMSEG_LIBS="-L$ac_cv_mmseg_libs -lmmseg -lzmq"
 fi
 
 # now that we did all we could, perform final checks
