@@ -1905,6 +1905,7 @@ inline int sphUTF8Encode ( BYTE * pBuf, int iCode ); // forward ref for GCC
 
 /// create UTF-8 tokenizer with Chinese Segment support
 ISphTokenizer *			sphCreateUTF8ChineseTokenizer ( const char* dict_path );
+ISphTokenizer *			sphCreateUTF8ZeroMQTokenizer ( const char* dict_path );
 ISphTokenizer *			sphCreateUTF8SpaceTokenizer ( );
 #endif
 
@@ -2217,6 +2218,19 @@ protected:
 
 };
 
+
+class CSphTokenizer_UTF8ZeroMQ:public CSphTokenizer_UTF8MMSeg
+{
+
+public:
+	virtual void				SetBuffer ( BYTE * sBuffer, int iLength );
+	virtual ISphTokenizer *		Clone ( bool bEscaped ) const;
+
+protected:
+	virtual bool				IsSegment(const BYTE * pCur);
+
+};
+
 #endif
 
 #if USE_WINDOWS
@@ -2255,6 +2269,14 @@ ISphTokenizer *	sphCreateUTF8SpaceTokenizer ( )
 	CSphTokenizer_UTF8Space* tokenizer = new CSphTokenizer_UTF8Space ();
 	return tokenizer;
 }
+
+ISphTokenizer *	sphCreateUTF8ZeroMQTokenizer ( const char* dict_path )
+{
+	CSphTokenizer_UTF8ZeroMQ* tokenizer = new CSphTokenizer_UTF8ZeroMQ ();
+	tokenizer->setDictPath(dict_path);
+	return tokenizer;
+}
+
 #endif 
 
 /////////////////////////////////////////////////////////////////////////////
@@ -3026,6 +3048,10 @@ ISphTokenizer * ISphTokenizer::Create ( const CSphTokenizerSettings & tSettings,
 			pTokenizer = sphCreateUTF8ChineseTokenizer
 				(tSettings.m_sDictPath.cstr()); break;
 		case TOKENIZER_SPACE:  pTokenizer = sphCreateUTF8SpaceTokenizer (); break;
+		
+		case TOKENIZER_ZMQ_UTF8:
+			pTokenizer = sphCreateUTF8ZeroMQTokenizer
+				(tSettings.m_sDictPath.cstr()); break;
 #endif
 		default:
 			sError.SetSprintf ( "failed to create tokenizer (unknown charset type '%d')", tSettings.m_iType );
@@ -4975,6 +5001,35 @@ ISphTokenizer * CSphTokenizer_UTF8Space::Clone ( bool bEscaped ) const
 	pClone->CloneBase ( this, bEscaped );
 	return pClone;
 }
+
+///////////////////////////////////////////////////////////////////////
+
+void CSphTokenizer_UTF8ZeroMQ::SetBuffer ( BYTE * sBuffer, int iLength )
+{
+	CSphTokenizer_UTF8::SetBuffer(sBuffer, iLength);
+	m_segoffset = 0;
+	m_segToken = (char*)m_pCur;
+	printf("call set buffer");
+	exit(0);
+}
+
+bool CSphTokenizer_UTF8ZeroMQ::IsSegment(const BYTE * pCur)
+{
+	size_t offset = pCur - m_pBuffer;
+	if (offset == 0) return true;
+	if (*pCur < 128) return true;
+	if (m_pBufferMax == pCur) return true;
+	return false;
+}
+
+ISphTokenizer * CSphTokenizer_UTF8ZeroMQ::Clone ( bool bEscaped ) const
+{
+	CSphTokenizer_UTF8ZeroMQ * pClone = new CSphTokenizer_UTF8ZeroMQ ();
+	pClone->m_dictpath = m_dictpath;
+	pClone->CloneBase ( this, bEscaped );
+	return pClone;
+}
+
 
 #endif
 
