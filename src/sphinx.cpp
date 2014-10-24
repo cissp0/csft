@@ -141,6 +141,12 @@
 	#pragma message("Automatically linking with btutils.lib")
 #endif
 
+#if ( USE_WINDOWS && USE_MMSEG )
+    #pragma comment(linker, "/defaultlib:libcss.lib")
+    #pragma message("Automatically linking with libcss.lib")
+    #pragma warning(disable:4530) // for ugly mmseg
+#endif
+
 /////////////////////////////////////////////////////////////////////////////
 
 // logf() is not there sometimes (eg. Solaris 9)
@@ -2586,6 +2592,23 @@ protected:
 	CSphString			m_sNgramCharsStr;
 };
 
+template < bool IS_QUERY >
+class CSphTokenizer_UTF8MMSeg : public CSphTokenizer_UTF8<IS_QUERY>
+{
+public:
+                                CSphTokenizer_UTF8MMSeg ();
+    virtual void				SetBuffer ( const BYTE * sBuffer, int iLength );
+    virtual BYTE *				GetToken ();
+    virtual ISphTokenizer *		Clone ( ESphTokenizerClone eMode ) const;
+    virtual const BYTE*			GetThesaurus(BYTE * sBuffer, int iLength );
+
+    CSphTokenizerBase* SetDictPath(const char* path) {	m_dictpath = path; return this; }
+
+protected:
+    // virtual bool				IsSegment(const BYTE * pCur);
+    CSphString m_dictpath;
+};
+
 
 struct CSphNormalForm
 {
@@ -3804,6 +3827,15 @@ ISphTokenizer * sphCreateUTF8NgramTokenizer ()
 	return new CSphTokenizer_UTF8Ngram<false> ();
 }
 
+#if USE_MMSEG
+ISphTokenizer *	sphCreateUTF8ChineseTokenizer ( const char* dict_path )
+{
+    CSphTokenizer_UTF8MMSeg<false>* tokenizer = new CSphTokenizer_UTF8MMSeg<false> ();
+    tokenizer->SetDictPath(dict_path);
+    return tokenizer;
+}
+#endif
+
 /////////////////////////////////////////////////////////////////////////////
 
 enum
@@ -4389,6 +4421,7 @@ CSphTokenizerSettings::CSphTokenizerSettings ()
 	: m_iType				( TOKENIZER_UTF8 )
 	, m_iMinWordLen			( 1 )
 	, m_iNgramLen			( 0 )
+    , m_iDebug				( 0 )
 {
 }
 
@@ -4428,7 +4461,11 @@ bool LoadTokenizerSettings ( CSphReader & tReader, CSphTokenizerSettings & tSett
 	tSettings.m_sIgnoreChars = tReader.GetString ();
 	tSettings.m_iNgramLen = tReader.GetDword ();
 	tSettings.m_sNgramChars = tReader.GetString ();
-	if ( uVersion>=15 )
+#if USE_MMSEG
+    //mmseg --coreseek, mmseg option make coreseek & sphinx's index is NOT the same.
+    tSettings.m_sDictPath		= tReader.GetString ();
+#endif
+    if ( uVersion>=15 )
 		tSettings.m_sBlendChars = tReader.GetString ();
 	if ( uVersion>=24 )
 		tSettings.m_sBlendMode = tReader.GetString();
@@ -4459,6 +4496,10 @@ void SaveTokenizerSettings ( CSphWriter & tWriter, ISphTokenizer * pTokenizer, i
 	tWriter.PutString ( tSettings.m_sIgnoreChars.cstr () );
 	tWriter.PutDword ( tSettings.m_iNgramLen );
 	tWriter.PutString ( tSettings.m_sNgramChars.cstr () );
+#if USE_MMSEG
+    // if turn mmseg off, the index(s) are compat again.
+    tWriter.PutString ( tSettings.m_sDictPath.cstr () );
+#endif
 	tWriter.PutString ( tSettings.m_sBlendChars.cstr () );
 	tWriter.PutString ( tSettings.m_sBlendMode.cstr () );
 }
@@ -4733,6 +4774,9 @@ ISphTokenizer * ISphTokenizer::Create ( const CSphTokenizerSettings & tSettings,
 	{
 		case TOKENIZER_UTF8:	pTokenizer = sphCreateUTF8Tokenizer (); break;
 		case TOKENIZER_NGRAM:	pTokenizer = sphCreateUTF8NgramTokenizer (); break;
+#if USE_MMSEG
+        case TOKENIZER_ZHCN_UTF8:   pTokenizer = sphCreateUTF8ChineseTokenizer(tSettings.m_sDictPath.cstr()); break;
+#endif
 		default:
 			sError.SetSprintf ( "failed to create tokenizer (unknown charset type '%d')", tSettings.m_iType );
 			return NULL;
@@ -6443,6 +6487,79 @@ BYTE * CSphTokenizer_UTF8Ngram<IS_QUERY>::GetToken ()
 	assert ( m_iNgramLen==1 );
 	return CSphTokenizer_UTF8<IS_QUERY>::GetToken ();
 }
+//////////////////////////////////////////////////////////////////////////
+#if USE_MMSEG
+//////////////////////////////////////////////////////////////////////////
+template < bool IS_QUERY >
+CSphTokenizer_UTF8MMSeg<IS_QUERY>::CSphTokenizer_UTF8MMSeg ()
+        :CSphTokenizer_UTF8<IS_QUERY>()
+        //m_segoffset(0)
+{
+
+}
+
+template < bool IS_QUERY >
+void CSphTokenizer_UTF8MMSeg<IS_QUERY>::SetBuffer ( const BYTE * sBuffer, int iLength )
+{
+
+}
+
+/*
++bool	CSphTokenizer_UTF8MMSeg::IsSegment(const BYTE * pCur)
++{
++	size_t offset = pCur - m_pBuffer;
++	//if(offset == 0)	return false;
++
++	css::Segmenter* seg = d_->GetSegmenter(m_dictpath.cstr()); //TODO fill blank here
++	if(seg){
++		u2 len = 0, symlen = 0;
++		const char* tok = NULL;
++		while(m_segoffset < offset) {
++			tok = (const char*)seg->peekToken(len, symlen);
++			seg->popToken(len);
++			m_segoffset += len;
++			if(tok == NULL || len==0){
++				//break?
++				break;
++			}
++		}
++		return (m_segoffset == offset);
++	} //end if seg
++	return true;
++}
+*/
+
+template < bool IS_QUERY >
+BYTE *	CSphTokenizer_UTF8MMSeg<IS_QUERY>::GetToken ()
+{
+    return NULL;
+}
+
+template < bool IS_QUERY >
+ISphTokenizer * CSphTokenizer_UTF8MMSeg<IS_QUERY>::Clone ( ESphTokenizerClone eMode ) const
+{
+    CSphTokenizerBase * pClone;
+    if ( eMode!=SPH_CLONE_INDEX ) {
+        pClone = (new CSphTokenizer_UTF8MMSeg<true>())->SetDictPath(m_dictpath.cstr());
+    }else{
+        pClone = (new CSphTokenizer_UTF8MMSeg<false>())->SetDictPath(m_dictpath.cstr());
+    }
+    pClone->CloneBase ( this, eMode );
+    return pClone;
+}
+
+template < bool IS_QUERY >
+const BYTE* CSphTokenizer_UTF8MMSeg<IS_QUERY>::GetThesaurus(BYTE * sBuffer, int iLength )
+{
+    /*
+    css::Segmenter* seg = d_->GetSegmenter(m_dictpath.cstr());
+    if(seg)
+        return (const BYTE*)seg->thesaurus((const char*)sBuffer, iLength);
+    */
+    return NULL;
+}
+
+#endif
 
 //////////////////////////////////////////////////////////////////////////
 
@@ -26127,7 +26244,11 @@ void CSphSource_Document::BuildRegularHits ( SphDocID_t uDocid, bool bPayload, b
 		&& ( sWord = m_pTokenizer->GetToken() )!=NULL )
 	{
         //FIXME: dump token to console --coreseek
-        //printf("%s/ ", sWord);
+        //debug dump
+        if(m_pTokenizer->DumpToken()) {
+            printf("%s_x ", sWord); // make the same as pre-tokenized text.
+        }
+
         // fix sWork if in pre-tokenized mode.
         int iBytes = strlen ( (const char*)sWord );
         bool bAdvancePos = true;
@@ -26201,6 +26322,27 @@ void CSphSource_Document::BuildRegularHits ( SphDocID_t uDocid, bool bPayload, b
 				m_tHits.AddHit ( uDocid, m_pDict->GetWordIDNonStemmed ( sBuf ), m_tState.m_iHitPos );
 		} else
 			m_tState.m_iBuildLastStep = m_iStopwordStep;
+#if USE_MMSEG
+        // works only when mmseg is on.
+        // zh_cn only GetThesaurus
+        {
+            int iBytes = strlen ( (const char*)sWord );
+            const BYTE* tbuf_ptr = m_pTokenizer->GetThesaurus(sWord, iBytes);
+            if(tbuf_ptr) {
+                while(*tbuf_ptr) {
+                    size_t len = strlen((const char*)tbuf_ptr);
+                    SphWordID_t iWord = m_pDict->GetWordID ( tbuf_ptr ,len , true);
+                    if ( iWord ) {
+                        m_tHits.AddHit ( uDocid, iWord, m_tState.m_iHitPos );
+                        // mmseg; do not inc step for we are in 'one' hit.
+                        //m_tState.m_iBuildLastStep = m_pTokenizer->TokenIsBlended() ? 0 : 1;
+                    }
+                    tbuf_ptr += len + 1; //move next
+                }
+            }
+            //end if buf
+        }//end GetThesaurus
+#endif
 	}
 
 	m_tState.m_bProcessingHits = ( sWord!=NULL );

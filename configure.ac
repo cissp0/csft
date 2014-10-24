@@ -489,7 +489,7 @@ AM_CONDITIONAL(USE_INTERNAL_LIBSTEMMER, test x$ac_cv_use_internal_libstemmer != 
 dnl ---
 
 # we can now set preprocessor flags for both C and C++ compilers
-CPPFLAGS="$CPPFLAGS $MYSQL_CFLAGS $PGSQL_CFLAGS $LIBSTEMMER_CFLAGS"
+CPPFLAGS="$CPPFLAGS $MYSQL_CFLAGS $PGSQL_CFLAGS $LIBSTEMMER_CFLAGS $MMSEG_CFLAGS"
 
 
 AC_ARG_WITH([libexpat],
