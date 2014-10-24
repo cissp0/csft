@@ -2592,23 +2592,66 @@ protected:
 	CSphString			m_sNgramCharsStr;
 };
 
+#if USE_MMSEG
+
+#include "SegmenterManager.h"
+#include "Segmenter.h"
+
+typedef CSR_Singleton<css::SegmenterManager> SegmenterManagerSingleInstance;
+
 template < bool IS_QUERY >
 class CSphTokenizer_UTF8MMSeg : public CSphTokenizer_UTF8<IS_QUERY>
 {
 public:
                                 CSphTokenizer_UTF8MMSeg ();
+                                ~CSphTokenizer_UTF8MMSeg() {
+                                    if(m_seg){
+                                        SafeDelete ( m_seg );
+                                    }
+                                }
+
     virtual void				SetBuffer ( const BYTE * sBuffer, int iLength );
     virtual BYTE *				GetToken ();
     virtual ISphTokenizer *		Clone ( ESphTokenizerClone eMode ) const;
     virtual const BYTE*			GetThesaurus(BYTE * sBuffer, int iLength );
+    bool                        IsSegment(const BYTE * pCur);
 
     CSphTokenizerBase* SetDictPath(const char* path) {	m_dictpath = path; return this; }
+
+    virtual const char *	GetBufferPtr () const		{ 		return (const char *) CSphTokenizer_UTF8MMSeg<IS_QUERY>::m_pCur;   }
+
+    virtual const char *			GetTokenStart () const		{ 	return m_segToken;      }
+
+    virtual int						GetLastTokenLen () const    {   return m_iLastTokenLenMMSeg;    }
+
+protected:
+    char*               m_segToken;
+    size_t              m_segoffset;
+    int                 m_iLastTokenLenMMSeg;
+    BYTE				m_sAccumSeg [ 3*SPH_MAX_WORD_LEN+3 ];	///< folded token accumulator
+    BYTE *				m_pAccumSeg;							///< current accumulator position
 
 protected:
     // virtual bool				IsSegment(const BYTE * pCur);
     CSphString m_dictpath;
+
+    // mmseg related
+    css::Segmenter* m_seg;
+    css::SegmenterManager* m_mgr;
+    css::Segmenter* GetSegmenter(const char* dict_path){
+        int nRet = 0;
+        if(!m_mgr) {
+            m_mgr = SegmenterManagerSingleInstance::Get();
+            if(dict_path)
+                nRet = m_mgr->init(dict_path);
+        }
+        if(nRet == 0 && !m_seg)
+            m_seg = m_mgr->getSegmenter(false);
+        return m_seg;
+    }
 };
 
+#endif
 
 struct CSphNormalForm
 {
@@ -6493,46 +6536,91 @@ BYTE * CSphTokenizer_UTF8Ngram<IS_QUERY>::GetToken ()
 template < bool IS_QUERY >
 CSphTokenizer_UTF8MMSeg<IS_QUERY>::CSphTokenizer_UTF8MMSeg ()
         :CSphTokenizer_UTF8<IS_QUERY>()
-        //m_segoffset(0)
+        , m_segoffset(0)
 {
+    //over ride charmap
+    CSphVector<CSphRemapRange> dRemaps;
+    dRemaps.Add ( CSphRemapRange ( 0x4e00, 0x9fff, 0x4e00 ) );
+    dRemaps.Add ( CSphRemapRange ( 0xFF00, 0xFFFF, 0xFF00 ) );
+    dRemaps.Add ( CSphRemapRange ( 0x3000, 0x303F, 0x3000 ) );
 
+    CSphTokenizer_UTF8<IS_QUERY>::m_tLC.AddRemaps ( dRemaps,
+        FLAG_CODEPOINT_NGRAM | FLAG_CODEPOINT_SPECIAL); // !COMMIT support other n-gram lengths than 1
+    m_pAccumSeg = m_sAccumSeg;
+    //m_iLastTokenBufferLen = 0;
+    m_iLastTokenLenMMSeg = 0;
 }
 
 template < bool IS_QUERY >
 void CSphTokenizer_UTF8MMSeg<IS_QUERY>::SetBuffer ( const BYTE * sBuffer, int iLength )
 {
-
+    CSphTokenizer_UTF8<IS_QUERY>::SetBuffer(sBuffer, iLength);
+    css::Segmenter* seg = GetSegmenter(m_dictpath.cstr());
+    if(seg)
+        seg->setBuffer((u1*)CSphTokenizer_UTF8MMSeg<IS_QUERY>::m_pBuffer, iLength);
+    else
+        sphDie ( " Tokenizer initialization failure. " );
+    m_segoffset = 0;
+    m_segToken = (char*)CSphTokenizer_UTF8MMSeg<IS_QUERY>::m_pCur;
 }
 
-/*
-+bool	CSphTokenizer_UTF8MMSeg::IsSegment(const BYTE * pCur)
-+{
-+	size_t offset = pCur - m_pBuffer;
-+	//if(offset == 0)	return false;
-+
-+	css::Segmenter* seg = d_->GetSegmenter(m_dictpath.cstr()); //TODO fill blank here
-+	if(seg){
-+		u2 len = 0, symlen = 0;
-+		const char* tok = NULL;
-+		while(m_segoffset < offset) {
-+			tok = (const char*)seg->peekToken(len, symlen);
-+			seg->popToken(len);
-+			m_segoffset += len;
-+			if(tok == NULL || len==0){
-+				//break?
-+				break;
-+			}
-+		}
-+		return (m_segoffset == offset);
-+	} //end if seg
-+	return true;
-+}
-*/
+template < bool IS_QUERY >
+bool	CSphTokenizer_UTF8MMSeg<IS_QUERY>::IsSegment(const BYTE * pCur)
+{
+    // this code might have bug, but as it will removed in next release...
+    size_t offset = pCur - CSphTokenizer_UTF8<IS_QUERY>::m_pBuffer;
+    //if(offset == 0)	return false;
+
+    css::Segmenter* seg = GetSegmenter(m_dictpath.cstr()); //TODO fill blank here
+    if(seg){
+        u2 len = 0, symlen = 0;
+        const char* tok = NULL;
+        while(m_segoffset < offset) {
+            tok = (const char*)seg->peekToken(len, symlen);
+            seg->popToken(len);
+            m_segoffset += len;
+            if(tok == NULL || len==0){
+                //break?
+                break;
+            }
+        }
+        return (m_segoffset == offset);
+    } //end if seg
+    return true;
+}
 
 template < bool IS_QUERY >
 BYTE *	CSphTokenizer_UTF8MMSeg<IS_QUERY>::GetToken ()
 {
-    return NULL;
+    //return CSphTokenizer_UTF8<IS_QUERY>::GetToken();
+    m_iLastTokenLenMMSeg = 0;
+    //BYTE* tok = CSphTokenizer_UTF8::GetToken();
+    while(!IsSegment(CSphTokenizer_UTF8<IS_QUERY>::m_pCur) || m_pAccumSeg == m_sAccumSeg)
+    {
+        BYTE* tok = CSphTokenizer_UTF8<IS_QUERY>::GetToken();
+        if(!tok){
+            m_iLastTokenLenMMSeg = 0;
+            return NULL;
+        }
+
+        int token_buf_len = strlen((const char*)tok);
+
+        if(m_pAccumSeg == m_sAccumSeg)
+            m_segToken = (char*)CSphTokenizer_UTF8<IS_QUERY>::m_pTokenStart;
+
+        if ( (m_pAccumSeg - m_sAccumSeg)<SPH_MAX_WORD_LEN )  {
+            ::memcpy(m_pAccumSeg, tok, token_buf_len);
+            m_pAccumSeg += token_buf_len;
+            m_iLastTokenLenMMSeg += CSphTokenizer_UTF8<IS_QUERY>::GetLastTokenLen();
+        }
+    }
+    {
+        *m_pAccumSeg = 0;
+        //m_iLastTokenBufferLen = m_pAccumSeg - m_sAccumSeg;
+        m_pAccumSeg = m_sAccumSeg;
+
+        return m_sAccumSeg;
+    }
 }
 
 template < bool IS_QUERY >
@@ -6551,11 +6639,9 @@ ISphTokenizer * CSphTokenizer_UTF8MMSeg<IS_QUERY>::Clone ( ESphTokenizerClone eM
 template < bool IS_QUERY >
 const BYTE* CSphTokenizer_UTF8MMSeg<IS_QUERY>::GetThesaurus(BYTE * sBuffer, int iLength )
 {
-    /*
-    css::Segmenter* seg = d_->GetSegmenter(m_dictpath.cstr());
+    css::Segmenter* seg = GetSegmenter(m_dictpath.cstr());
     if(seg)
         return (const BYTE*)seg->thesaurus((const char*)sBuffer, iLength);
-    */
     return NULL;
 }
 
@@ -25641,6 +25727,7 @@ void CSphSource::Setup ( const CSphSourceSettings & tSettings )
 	m_bIndexExactWords = tSettings.m_bIndexExactWords;
 	m_iOvershortStep = Min ( Max ( tSettings.m_iOvershortStep, 0 ), 1 );
 	m_iStopwordStep = Min ( Max ( tSettings.m_iStopwordStep, 0 ), 1 );
+    m_bDebugDump = tSettings.m_bDebugDump; //coreseek: assign debug charset setting
 	m_bIndexSP = tSettings.m_bIndexSP;
 	m_dPrefixFields = tSettings.m_dPrefixFields;
 	m_dInfixFields = tSettings.m_dInfixFields;

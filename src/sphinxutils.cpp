@@ -1152,7 +1152,7 @@ void sphConfTokenizer ( const CSphConfigSection & hIndex, CSphTokenizerSettings 
 
 #if USE_MMSEG
     //XXX:fixme : sphinx changes tokenizer create process
-    if (hIndex("charset_dictpath") && hIndex["charset_type"]=="zh_cn" )
+    if (hIndex("charset_dictpath") && CSphString(hIndex.GetStr("charset_type")) =="zh_cn.utf-8" )
     {
         tSettings.m_sDictPath = hIndex.GetStr("charset_dictpath");
         tSettings.m_iType = TOKENIZER_ZHCN_UTF8;
