@@ -28,6 +28,7 @@
 	#define	USE_RE2			0	/// whether to compile RE2 support
 	#define USE_RLP			0	/// whether to compile RLP support
 	#define USE_WINDOWS		1	/// whether to compile for Windows
+    #define USE_MMSEG		1   /// enable mmseg
 	#define USE_SYSLOG		0	/// whether to use syslog for logging
 
 	#define UNALIGNED_RAM_ACCESS	1
@@ -508,7 +509,10 @@ struct CSphTokenizerSettings
 	CSphString			m_sBlendChars;
 	CSphString			m_sBlendMode;
 	CSphString			m_sIndexingPlugin;	///< this tokenizer wants an external plugin to process its raw output
-
+    int                 m_iDebug;           ///< is in tokenizer debug mode.
+#if USE_MMSEG
+    CSphString			m_sDictPath;        ///coreseek: where to find segmentor's dict.
+#endif
 						CSphTokenizerSettings ();
 };
 
@@ -619,6 +623,8 @@ public:
 
 	/// get synonym file info
 	virtual const CSphSavedFile &	GetSynFileInfo () const { return m_tSynFileInfo; }
+    /// mark as debug tokenizer's output --coreseek -mmseg
+    virtual int					DumpToken () { return m_tSettings.m_iDebug; }
 
 public:
 	/// pass next buffer
@@ -705,6 +711,9 @@ public:
 	/// set new buffer ptr (must be within current bounds)
 	virtual void					SetBufferPtr ( const char * sNewPtr ) = 0;
 
+#if USE_MMSEG
+    virtual const BYTE*				GetThesaurus(BYTE * , int  ) { return NULL; }
+#endif
 	/// get settings hash
 	virtual uint64_t				GetSettingsFNV () const;
 
@@ -729,6 +738,9 @@ protected:
 	CSphLowercaser					m_tLC;						///< my lowercaser
 	int								m_iLastTokenLen;			///< last token length, in codepoints
 	bool							m_bTokenBoundary;			///< last token boundary flag (true after boundary codepoint followed by separator)
+#if USE_MMSEG
+    int								m_iLastTokenBufferLen;		///< the buffer length -- coreseek;	use in mmseg patch.
+#endif
 	bool							m_bBoundary;				///< boundary flag (true immediately after boundary codepoint)
 	int								m_iBoundaryOffset;			///< boundary character offset (in bytes)
 	bool							m_bWasSpecial;				///< special token flag
@@ -1835,6 +1847,7 @@ struct CSphSourceSettings
 	int		m_iStopwordStep;	///< position step on stopword token (default is 1)
 	bool	m_bIndexSP;			///< whether to index sentence and paragraph delimiters
 	bool	m_bIndexFieldLens;	///< whether to index field lengths
+    int		m_bDebugDump;		///< mmseg charset debug output feature
 
 	CSphVector<CSphString>	m_dPrefixFields;	///< list of prefix fields
 	CSphVector<CSphString>	m_dInfixFields;		///< list of infix fields
