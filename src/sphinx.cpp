@@ -4476,7 +4476,11 @@ bool LoadTokenizerSettings ( CSphReader & tReader, CSphTokenizerSettings & tSett
 		return true;
 
 	tSettings.m_iType = tReader.GetByte ();
-	if ( tSettings.m_iType!=TOKENIZER_UTF8 && tSettings.m_iType!=TOKENIZER_NGRAM )
+#if USE_MMSEG
+    if ( tSettings.m_iType!=TOKENIZER_UTF8 && tSettings.m_iType!=TOKENIZER_NGRAM && tSettings.m_iType!=TOKENIZER_ZHCN_UTF8)
+#else
+    if ( tSettings.m_iType!=TOKENIZER_UTF8 && tSettings.m_iType!=TOKENIZER_NGRAM)
+#endif
 	{
 		sWarning = "can't load an old index with SBCS tokenizer";
 		return false;
@@ -6549,6 +6553,9 @@ CSphTokenizer_UTF8MMSeg<IS_QUERY>::CSphTokenizer_UTF8MMSeg ()
     m_pAccumSeg = m_sAccumSeg;
     //m_iLastTokenBufferLen = 0;
     m_iLastTokenLenMMSeg = 0;
+
+    m_mgr = NULL;
+    m_seg = NULL;
 }
 
 template < bool IS_QUERY >
