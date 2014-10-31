@@ -2625,7 +2625,6 @@ public:
     virtual int						GetLastTokenLen () const    {   return m_iLastTokenLenMMSeg;    }
 
     virtual void                    ReloadSegDictionary()    {
-        printf("aaaaa");
         if(m_seg){
             SafeDelete ( m_seg );
         }
@@ -2635,7 +2634,6 @@ public:
             SegmenterManagerSingleInstance::Free(); // free preexist instance.
             m_mgr = NULL;
         }
-        printf("bbbb");
     }
 protected:
     char*               m_segToken;
