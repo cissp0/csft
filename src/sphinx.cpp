@@ -2624,6 +2624,17 @@ public:
 
     virtual int						GetLastTokenLen () const    {   return m_iLastTokenLenMMSeg;    }
 
+    virtual void                    Reload()    {
+        if(m_seg){
+            SafeDelete ( m_seg );
+        }
+        m_seg = NULL;
+
+        if(m_mgr) {
+            SegmenterManagerSingleInstance::Free(); // free preexist instance.
+            m_mgr = NULL;
+        }
+    }
 protected:
     char*               m_segToken;
     size_t              m_segoffset;

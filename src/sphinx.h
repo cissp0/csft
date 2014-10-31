@@ -707,6 +707,7 @@ public:
 
 #if USE_MMSEG
     virtual const BYTE*				GetThesaurus(BYTE * , int  ) { return NULL; }
+    virtual void                    Reload()    {   return; }       // reload mmseg's dictionary.
 #endif
 	/// get settings hash
 	virtual uint64_t				GetSettingsFNV () const;
