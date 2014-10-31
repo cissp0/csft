@@ -2624,7 +2624,7 @@ public:
 
     virtual int						GetLastTokenLen () const    {   return m_iLastTokenLenMMSeg;    }
 
-    virtual void                    Reload()    {
+    virtual void                    ReloadSegDictionary()    {
         if(m_seg){
             SafeDelete ( m_seg );
         }
@@ -9890,6 +9890,7 @@ void CSphIndex::SetupQueryTokenizer()
 	// create and setup a master copy of query time tokenizer
 	// that we can then use to create lightweight clones
 	SafeDelete ( m_pQueryTokenizer );
+    m_pTokenizer->ReloadSegDictionary();
 	m_pQueryTokenizer = m_pTokenizer->Clone ( SPH_CLONE_QUERY );
 	if ( IsStarDict() )
 	{

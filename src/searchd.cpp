@@ -19834,9 +19834,6 @@ void ConfigureLocalIndex ( ServedDesc_t & tIdx, const CSphConfigSection & hIndex
 	tIdx.m_sGlobalIDFPath = hIndex.GetStr ( "global_idf" );
 	tIdx.m_bOnDiskAttrs = ( hIndex.GetInt ( "ondisk_attrs", 0 )==1 );
 	tIdx.m_bOnDiskPools = ( strcmp ( hIndex.GetStr ( "ondisk_attrs", "" ), "pool" )==0 );
-#if USE_MMSEG
-    tIdx.m_pIndex->GetQueryTokenizer()->Reload();
-#endif
 }
 
 
