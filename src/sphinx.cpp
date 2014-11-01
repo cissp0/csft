@@ -2641,7 +2641,8 @@ protected:
     int                 m_iLastTokenLenMMSeg;
     BYTE				m_sAccumSeg [ 3*SPH_MAX_WORD_LEN+3 ];	///< folded token accumulator
     BYTE *				m_pAccumSeg;							///< current accumulator position
-
+    CSphVector<u2>      m_tokenlens;
+    int                 m_tokenpos;
 protected:
     // virtual bool				IsSegment(const BYTE * pCur);
     CSphString m_dictpath;
@@ -6567,6 +6568,7 @@ CSphTokenizer_UTF8MMSeg<IS_QUERY>::CSphTokenizer_UTF8MMSeg ()
 
     m_mgr = NULL;
     m_seg = NULL;
+    m_tokenlens.Reserve(1024*512);  // resize to 512K
 }
 
 template < bool IS_QUERY >
@@ -6580,6 +6582,22 @@ void CSphTokenizer_UTF8MMSeg<IS_QUERY>::SetBuffer ( const BYTE * sBuffer, int iL
         sphDie ( " Tokenizer initialization failure. " );
     m_segoffset = 0;
     m_segToken = (char*)CSphTokenizer_UTF8MMSeg<IS_QUERY>::m_pCur;
+    
+    m_tokenlens.Reset();
+    m_tokenpos = 0;
+    {
+    	u2 len = 0, symlen = 0;
+        while(1){
+            len = 0;
+            char* tok = (char*)seg->peekToken(len,symlen);
+            if(!tok || !*tok || !len)
+                break;
+            seg->popToken(len);
+
+            m_tokenlens.Add(len);
+            //printf("%*.*s/p ",symlen,symlen,tok);
+        }
+    }
 }
 
 template < bool IS_QUERY >
@@ -6588,20 +6606,29 @@ bool	CSphTokenizer_UTF8MMSeg<IS_QUERY>::IsSegment(const BYTE * pCur)
     // this code might have bug, but as it will removed in next release...
     size_t offset = pCur - CSphTokenizer_UTF8<IS_QUERY>::m_pBuffer;
     //if(offset == 0)	return false;
+    //printf("pcur: %s\n", pCur);
 
-    css::Segmenter* seg = GetSegmenter(m_dictpath.cstr()); //TODO fill blank here
-    if(seg){
+    //css::Segmenter* seg = GetSegmenter(m_dictpath.cstr()); //TODO fill blank here
+    {
         u2 len = 0, symlen = 0;
-        const char* tok = NULL;
         while(m_segoffset < offset) {
-            tok = (const char*)seg->peekToken(len, symlen);
-            seg->popToken(len);
+            //tok = (const char*)seg->peekToken(len, symlen);
+            //seg->popToken(len);
+            len = m_tokenlens[m_tokenpos];
+            m_tokenpos ++;
             m_segoffset += len;
-            if(tok == NULL || len==0){
+            //printf("tok: %*.*s, len=%d\t ",len,len,tok, len);
+            if(m_tokenpos >= m_tokenlens.GetLength() || len==0){
                 //break?
                 break;
             }
         }
+        /*
+        printf("\n");
+        printf("seg_off %d vs off %d\n", m_segoffset, offset);
+        if(m_segoffset != offset)
+        	printf("seg_pcur: %s\n", pCur);
+        */
         return (m_segoffset == offset);
     } //end if seg
     return true;
@@ -6616,6 +6643,7 @@ BYTE *	CSphTokenizer_UTF8MMSeg<IS_QUERY>::GetToken ()
     while(!IsSegment(CSphTokenizer_UTF8<IS_QUERY>::m_pCur) || m_pAccumSeg == m_sAccumSeg)
     {
         BYTE* tok = CSphTokenizer_UTF8<IS_QUERY>::GetToken();
+        //printf("utf8_token: %s \t ", tok);
         if(!tok){
             m_iLastTokenLenMMSeg = 0;
             return NULL;
