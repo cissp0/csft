@@ -131,12 +131,17 @@ const int				ROWITEM_SHIFT	= 5;
 
 STATIC_ASSERT ( ( 1 << ROWITEM_SHIFT )==ROWITEM_BITS, INVALID_ROWITEM_SHIFT );
 
+#if defined(__APPLE__) && defined(__MACH__)
+
 #ifdef __LITTLE_ENDIAN__
 #	define USE_LITTLE_ENDIAN 1
 #else
 #	define USE_LITTLE_ENDIAN 0
 #endif
 
+#endif
+
+#	define USE_LITTLE_ENDIAN 1
 
 #ifndef USE_LITTLE_ENDIAN
 #error Please define endianness
@@ -2666,6 +2671,7 @@ public:
 	bool			m_bGlobalIDF;		///< whether to use local indexes or a global idf file
 	bool			m_bNormalizedTFIDF;	///< whether to scale IDFs by query word count, so that TF*IDF is normalized
 	bool			m_bLocalDF;			///< whether to use calculate DF among local indexes
+    bool        m_bUseCache;        ///< control by user whether use cache or not.
 
 	CSphVector<CSphFilterSettings>	m_dFilters;	///< filters
 

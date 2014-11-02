@@ -6574,6 +6574,13 @@ bool ParseSearchQuery ( InputBuffer_c & tReq, CSphQuery & tQuery, int iVer, int 
 	tQuery.m_iWeights = tReq.GetDwords ( (DWORD**)&tQuery.m_pWeights, SPH_MAX_FIELDS, "invalid weight count %d (should be in 0..%d range)" );
 	tQuery.m_sIndexes = tReq.GetString ();
 
+    // cache control
+    {
+        if(strncmp("$cache$", tQuery.m_sRawQuery.cstr(), 7) == 0) {
+               tQuery.m_sRawQuery = tQuery.m_sRawQuery.SubString(7, tQuery.m_sRawQuery.Length() - 7);
+               tQuery.m_bUseCache = true;
+         }
+    }
 	bool bIdrange64 = false;
 	if ( iVer>=0x108 )
 		bIdrange64 = ( tReq.GetInt()!=0 );
@@ -10773,20 +10780,17 @@ void SearchHandler_c::RunSubset ( int iStart, int iEnd )
         {
             for ( int iQuery=m_iStart; iQuery<=m_iEnd; iQuery++ )
             {
-                //char safeInfoBuf [ 1024 ];
                 char sFile [ SPH_MAX_FILENAME_LEN ];
 
                 //CSphString sError;
                 CSphQuery & tQuery = m_dQueries[iQuery];
                 QuerySphinxqlStringExpr(tQuery, tBuf);
-                //printf("idx:%s, query %s\n", sLocal, tBuf.cstr());
+                //printf("query:%s, raw:%s\n", tQuery.m_sQuery.cstr(), tQuery.m_sRawQuery.cstr());
                 uint64_t uHash = sphFNV64 ( tBuf.cstr() );
-                //memset(safeInfoBuf, 0, sizeof(safeInfoBuf));
-                //sphSafeInfo ( safeInfoBuf, "%x.srs\0", uHash);
                 // check cache file exist...
                 tQuery.m_iQueryCacheResultSize = 0;
 
-                if(!g_sQueryCachePath.IsEmpty()) {
+                if(tQuery.m_bUseCache && !g_sQueryCachePath.IsEmpty()) {
                     memset(sFile, 0, sizeof(sFile));
                     snprintf ( sFile, sizeof(sFile), "%s_%04llx.srs", g_sQueryCachePath.cstr(), uHash);
                     tQuery.m_sQueryHash = sFile;
