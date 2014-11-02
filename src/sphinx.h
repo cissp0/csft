@@ -2737,6 +2737,9 @@ public:
 	ISphTableFunc *	m_pTableFunc;		///< post-query NOT OWNED, WILL NOT BE FREED in dtor.
 	CSphFilterSettings	m_tHaving;		///< post aggregate filtering (got applied only on master)
 
+    CSphString      m_sQueryHash;
+    int             m_iQueryCacheResultSize;    ///< if 0 means cache invalid
+
 public:
 	int				m_iSQLSelectStart;	///< SQL parser helper
 	int				m_iSQLSelectEnd;	///< SQL parser helper

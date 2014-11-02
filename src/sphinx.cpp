@@ -7053,6 +7053,7 @@ CSphQuery::CSphQuery ()
 	, m_bIgnoreNonexistentIndexes ( false )
 	, m_bStrict			( false )
 	, m_pTableFunc		( NULL )
+    , m_iQueryCacheResultSize  ( 0 )
 
 	, m_iSQLSelectStart	( -1 )
 	, m_iSQLSelectEnd	( -1 )
@@ -19143,6 +19144,10 @@ bool CSphIndex_VLN::MultiQuery ( const CSphQuery * pQuery, CSphQueryResult * pRe
 {
 	assert ( pQuery );
 	CSphQueryProfile * pProfile = pResult->m_pProfile;
+    if(pQuery->m_iQueryCacheResultSize) {
+        //printf("query cache-hit.\n");
+        return true;        // have result no needs query anymore.
+    }
 
 	MEMORY ( MEM_DISK_QUERY );
 
@@ -19290,6 +19295,10 @@ bool CSphIndex_VLN::MultiQueryEx ( int iQueries, const CSphQuery * pQueries,
 			continue;
 		}
 
+        if(pQueries[i].m_iQueryCacheResultSize) {
+            //printf("multi query cache-hit.\n");
+            continue;        // have result no needs query anymore.
+        }
 		ppResults[i]->m_tIOStats.Start();
 
 		// parse query

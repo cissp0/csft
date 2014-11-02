@@ -520,6 +520,7 @@ static KeyDesc_t g_dKeysSearchd[] =
 	{ "max_batch_queries",		0, NULL },
 	{ "subtree_docs_cache",		0, NULL },
 	{ "subtree_hits_cache",		0, NULL },
+    { "ondisk_query_cache",		0, NULL },  /// <- a file path where save query cache. (should remove when index rotate.)
 	{ "workers",				0, NULL },
 	{ "prefork",				KEY_HIDDEN, NULL },
 	{ "dist_threads",			0, NULL },
