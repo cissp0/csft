@@ -115,6 +115,52 @@ extern "C"
 #endif
 
 /////////////////////////////////////////////////////////////////////////////
+// Binary Dump, Debug usage only --coreseek.
+/////////////////////////////////////////////////////////////////////////////
+void hexDump (const char *desc, const void *addr, int len) {
+    int i;
+    unsigned char buff[17];
+    unsigned char *pc = (unsigned char*)addr;
+
+    // Output description if given.
+    if (desc != NULL)
+        printf ("%s:\n", desc);
+
+    // Process every byte in the data.
+    for (i = 0; i < len; i++) {
+        // Multiple of 16 means new line (with line offset).
+
+        if ((i % 16) == 0) {
+            // Just don't print ASCII for the zeroth line.
+            if (i != 0)
+                printf ("  %s\n", buff);
+
+            // Output the offset.
+            printf ("  %04x ", i);
+        }
+
+        // Now the hex code for the specific character.
+        printf (" %02x", pc[i]);
+
+        // And store a printable ASCII character for later.
+        if ((pc[i] < 0x20) || (pc[i] > 0x7e))
+            buff[i % 16] = '.';
+        else
+            buff[i % 16] = pc[i];
+        buff[(i % 16) + 1] = '\0';
+    }
+
+    // Pad out last line if not exactly 16 characters.
+    while ((i % 16) != 0) {
+        printf ("   ");
+        i++;
+    }
+
+    // And print the final ASCII bit.
+    printf ("  %s\n", buff);
+}
+
+/////////////////////////////////////////////////////////////////////////////
 // MISC GLOBALS
 /////////////////////////////////////////////////////////////////////////////
 
@@ -302,6 +348,8 @@ static CSphVector<Listener_t>	g_dListeners;
 
 static int				g_iQueryLogFile	= -1;
 static CSphString		g_sQueryLogFile;
+static CSphString		g_sQueryCachePath;
+
 static const char *		g_sPidFile		= NULL;
 static int				g_iPidFD		= -1;
 
@@ -2880,6 +2928,14 @@ public:
 	bool		GetError () { return m_bError; }
 	int			GetSentCount () { return m_iSent; }
 	void		FreezeBlock ( const char * sError, int iLen );
+    int         GetBufferWriteLength() const {
+        return m_pBufferPtr - m_pBuffer;
+    }
+    const BYTE* GetBufferDataPtr(int offset) {
+        if(offset >= m_iBufferSize)
+            return NULL;
+        return m_pBuffer+offset;
+    }
 
 protected:
 	BYTE *		m_pBuffer;			///< my dynamic buffer
@@ -7003,6 +7059,205 @@ static void FormatOrderBy ( CSphStringBuilder * pBuf, const char * sPrefix, ESph
 	}
 }
 
+static void QuerySphinxqlStringExpr(const CSphQuery & q, CSphStringBuilder& tBuf) {
+    ///////////////////////////////////
+    // format request as SELECT query
+    ///////////////////////////////////
+
+    if ( q.m_bHasOuter )
+        tBuf += "SELECT * FROM (";
+
+    tBuf.Appendf ( "SELECT %s FROM %s", q.m_sSelect.cstr(), q.m_sIndexes.cstr() );
+
+    // WHERE clause
+    // (m_sRawQuery is empty when using MySQL handler)
+    const CSphString & sQuery = q.m_sQuery;
+    if ( !sQuery.IsEmpty() || q.m_dFilters.GetLength() )
+    {
+        bool bDeflowered = false;
+
+        tBuf += " WHERE";
+        if ( !sQuery.IsEmpty() )
+        {
+            tBuf += " MATCH('";
+            tBuf.AppendEscaped ( sQuery.cstr() );
+            tBuf += "')";
+            bDeflowered = true;
+        }
+
+        ARRAY_FOREACH ( i, q.m_dFilters )
+        {
+            if ( bDeflowered )
+                tBuf += " AND";
+            bDeflowered = true;
+
+            const CSphFilterSettings & f = q.m_dFilters[i];
+            switch ( f.m_eType )
+            {
+                case SPH_FILTER_VALUES:
+                    if ( f.m_dValues.GetLength()==1 )
+                    {
+                        if ( f.m_bExclude )
+                            tBuf.Appendf ( " %s!="INT64_FMT, f.m_sAttrName.cstr(), (int64_t)f.m_dValues[0] );
+                        else
+                            tBuf.Appendf ( " %s="INT64_FMT, f.m_sAttrName.cstr(), (int64_t)f.m_dValues[0] );
+                    } else
+                    {
+                        if ( f.m_bExclude )
+                            tBuf.Appendf ( " %s NOT IN (", f.m_sAttrName.cstr() );
+                        else
+                            tBuf.Appendf ( " %s IN (", f.m_sAttrName.cstr() );
+
+                        if ( g_bShortenIn && ( SHORTEN_IN_LIMIT+1<f.m_dValues.GetLength() ) )
+                        {
+                            // for really long IN-lists optionally format them as N,N,N,N,...N,N,N, with ellipsis inside.
+                            int iLimit = SHORTEN_IN_LIMIT-3;
+                            for ( int j=0; j<iLimit; ++j )
+                            {
+                                if ( j )
+                                    tBuf.Appendf ( ","INT64_FMT, (int64_t)f.m_dValues[j] );
+                                else
+                                    tBuf.Appendf ( INT64_FMT, (int64_t)f.m_dValues[j] );
+                            }
+                            iLimit = f.m_dValues.GetLength();
+                            tBuf.Appendf ( "%s", ",..." );
+                            for ( int j=iLimit-3; j<iLimit; ++j )
+                            {
+                                if ( j )
+                                    tBuf.Appendf ( ","INT64_FMT, (int64_t)f.m_dValues[j] );
+                                else
+                                    tBuf.Appendf ( INT64_FMT, (int64_t)f.m_dValues[j] );
+                            }
+
+                        } else
+                            ARRAY_FOREACH ( j, f.m_dValues )
+                            {
+                                if ( j )
+                                    tBuf.Appendf ( ","INT64_FMT, (int64_t)f.m_dValues[j] );
+                                else
+                                    tBuf.Appendf ( INT64_FMT, (int64_t)f.m_dValues[j] );
+                            }
+                        tBuf += ")";
+                    }
+                    break;
+
+                case SPH_FILTER_RANGE:
+                    if ( f.m_iMinValue==int64_t(INT64_MIN) || ( f.m_iMinValue==0 && f.m_sAttrName=="@id" ) )
+                    {
+                        // no min, thus (attr<maxval)
+                        const char * sOps[2][2] = { { "<", "<=" }, { ">=", ">" } };
+                        tBuf.Appendf ( " %s%s"INT64_FMT, f.m_sAttrName.cstr(),
+                            sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_iMaxValue );
+                    } else if ( f.m_iMaxValue==INT64_MAX || ( f.m_iMaxValue==-1 && f.m_sAttrName=="@id" ) )
+                    {
+                        // mo max, thus (attr>minval)
+                        const char * sOps[2][2] = { { ">", ">=" }, { "<", "<=" } };
+                        tBuf.Appendf ( " %s%s"INT64_FMT, f.m_sAttrName.cstr(),
+                            sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_iMinValue );
+                    } else
+                    {
+                        tBuf.Appendf ( " %s%s BETWEEN "INT64_FMT" AND "INT64_FMT,
+                            f.m_sAttrName.cstr(), f.m_bExclude ? " NOT" : "",
+                            f.m_iMinValue + !f.m_bHasEqual, f.m_iMaxValue - !f.m_bHasEqual );
+                    }
+                    break;
+
+                case SPH_FILTER_FLOATRANGE:
+                    if ( f.m_fMinValue==-FLT_MAX )
+                    {
+                        // no min, thus (attr<maxval)
+                        const char * sOps[2][2] = { { "<", "<=" }, { ">=", ">" } };
+                        tBuf.Appendf ( " %s%s%f", f.m_sAttrName.cstr(),
+                            sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_fMaxValue );
+                    } else if ( f.m_fMaxValue==FLT_MAX )
+                    {
+                        // mo max, thus (attr>minval)
+                        const char * sOps[2][2] = { { ">", ">=" }, { "<", "<=" } };
+                        tBuf.Appendf ( " %s%s%f", f.m_sAttrName.cstr(),
+                            sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_fMinValue );
+                    } else
+                    {
+                        // FIXME? need we handle m_bHasEqual here?
+                        tBuf.Appendf ( " %s%s BETWEEN %f AND %f",
+                            f.m_sAttrName.cstr(), f.m_bExclude ? " NOT" : "",
+                            f.m_fMinValue, f.m_fMaxValue );
+                    }
+                    break;
+
+                case SPH_FILTER_USERVAR:
+                case SPH_FILTER_STRING:
+                    tBuf.Appendf ( " %s%s'%s'", f.m_sAttrName.cstr(), ( f.m_bHasEqual ? "=" : "!=" ), f.m_sRefString.cstr() );
+                    break;
+
+                case SPH_FILTER_NULL:
+                    tBuf.Appendf ( " %s %s", f.m_sAttrName.cstr(), ( f.m_bHasEqual ? "IS NULL" : "IS NOT NULL" ) );
+                    break;
+
+                default:
+                    tBuf += " 1 /""* oops, unknown filter type *""/";
+                    break;
+            }
+        }
+    }
+
+    // ORDER BY and/or GROUP BY clause
+    if ( q.m_sGroupBy.IsEmpty() )
+    {
+        if ( !q.m_sSortBy.IsEmpty() ) // case API SPH_MATCH_EXTENDED2 - SPH_SORT_RELEVANCE
+            FormatOrderBy ( &tBuf, " ORDER BY", q.m_eSort, q.m_sSortBy );
+    } else
+    {
+        tBuf.Appendf ( " GROUP BY %s", q.m_sGroupBy.cstr() );
+        FormatOrderBy ( &tBuf, "WITHIN GROUP ORDER BY", q.m_eSort, q.m_sSortBy );
+        if ( q.m_sGroupSortBy!="@group desc" )
+            FormatOrderBy ( &tBuf, "ORDER BY", SPH_SORT_EXTENDED, q.m_sGroupSortBy );
+    }
+
+    // LIMIT clause
+    if ( q.m_iOffset!=0 || q.m_iLimit!=20 )
+        tBuf.Appendf ( " LIMIT %d,%d", q.m_iOffset, q.m_iLimit );
+
+    // OPTION clause
+    int iOpts = 0;
+
+    if ( q.m_iMaxMatches!=1000 )
+    {
+        tBuf.Appendf ( iOpts++ ? ", " : " OPTION " );
+        tBuf.Appendf ( "max_matches=%d", q.m_iMaxMatches );
+    }
+
+    if ( !q.m_sComment.IsEmpty() )
+    {
+        tBuf.Appendf ( iOpts++ ? ", " : " OPTION " );
+        tBuf.Appendf ( "comment='%s'", q.m_sComment.cstr() ); // FIXME! escape, replace newlines..
+    }
+
+    if ( q.m_eRanker!=SPH_RANK_DEFAULT )
+    {
+        const char * sRanker = sphGetRankerName ( q.m_eRanker );
+        if ( !sRanker )
+            sRanker = sphGetRankerName ( SPH_RANK_DEFAULT );
+
+        tBuf.Appendf ( iOpts++ ? ", " : " OPTION " );
+        tBuf.Appendf ( "ranker=%s", sRanker );
+    }
+
+    // outer order by, limit
+    if ( q.m_bHasOuter )
+    {
+        tBuf += ")";
+        if ( !q.m_sOuterOrderBy.IsEmpty() )
+            tBuf.Appendf ( " ORDER BY %s", q.m_sOuterOrderBy.cstr() );
+        if ( q.m_iOuterOffset>0 )
+            tBuf.Appendf ( " LIMIT %d, %d", q.m_iOuterOffset, q.m_iOuterLimit );
+        else if ( q.m_iOuterLimit>0 )
+            tBuf.Appendf ( " LIMIT %d", q.m_iOuterLimit );
+    }
+
+    // finish SQL statement
+    tBuf += ";";
+}
+
 static void LogQuerySphinxql ( const CSphQuery & q, const CSphQueryResult & tRes, const CSphVector<int64_t> & dAgentTimes )
 {
 	assert ( g_eLogFormat==LOG_FORMAT_SPHINXQL );
@@ -7031,202 +7286,7 @@ static void LogQuerySphinxql ( const CSphQuery & q, const CSphQueryResult & tRes
 		tBuf.Appendf ( " conn %d real %d.%03d wall %d.%03d found "INT64_FMT" *""/ ",
 			iCid, iRealTime/1000, iRealTime%1000, iQueryTime/1000, iQueryTime%1000, tRes.m_iTotalMatches );
 
-	///////////////////////////////////
-	// format request as SELECT query
-	///////////////////////////////////
-
-	if ( q.m_bHasOuter )
-		tBuf += "SELECT * FROM (";
-
-	tBuf.Appendf ( "SELECT %s FROM %s", q.m_sSelect.cstr(), q.m_sIndexes.cstr() );
-
-	// WHERE clause
-	// (m_sRawQuery is empty when using MySQL handler)
-	const CSphString & sQuery = q.m_sQuery;
-	if ( !sQuery.IsEmpty() || q.m_dFilters.GetLength() )
-	{
-		bool bDeflowered = false;
-
-		tBuf += " WHERE";
-		if ( !sQuery.IsEmpty() )
-		{
-			tBuf += " MATCH('";
-			tBuf.AppendEscaped ( sQuery.cstr() );
-			tBuf += "')";
-			bDeflowered = true;
-		}
-
-		ARRAY_FOREACH ( i, q.m_dFilters )
-		{
-			if ( bDeflowered )
-				tBuf += " AND";
-			bDeflowered = true;
-
-			const CSphFilterSettings & f = q.m_dFilters[i];
-			switch ( f.m_eType )
-			{
-				case SPH_FILTER_VALUES:
-					if ( f.m_dValues.GetLength()==1 )
-					{
-						if ( f.m_bExclude )
-							tBuf.Appendf ( " %s!="INT64_FMT, f.m_sAttrName.cstr(), (int64_t)f.m_dValues[0] );
-						else
-							tBuf.Appendf ( " %s="INT64_FMT, f.m_sAttrName.cstr(), (int64_t)f.m_dValues[0] );
-					} else
-					{
-						if ( f.m_bExclude )
-							tBuf.Appendf ( " %s NOT IN (", f.m_sAttrName.cstr() );
-						else
-							tBuf.Appendf ( " %s IN (", f.m_sAttrName.cstr() );
-
-						if ( g_bShortenIn && ( SHORTEN_IN_LIMIT+1<f.m_dValues.GetLength() ) )
-						{
-							// for really long IN-lists optionally format them as N,N,N,N,...N,N,N, with ellipsis inside.
-							int iLimit = SHORTEN_IN_LIMIT-3;
-							for ( int j=0; j<iLimit; ++j )
-							{
-								if ( j )
-									tBuf.Appendf ( ","INT64_FMT, (int64_t)f.m_dValues[j] );
-								else
-									tBuf.Appendf ( INT64_FMT, (int64_t)f.m_dValues[j] );
-							}
-							iLimit = f.m_dValues.GetLength();
-							tBuf.Appendf ( "%s", ",..." );
-							for ( int j=iLimit-3; j<iLimit; ++j )
-							{
-								if ( j )
-									tBuf.Appendf ( ","INT64_FMT, (int64_t)f.m_dValues[j] );
-								else
-									tBuf.Appendf ( INT64_FMT, (int64_t)f.m_dValues[j] );
-							}
-
-						} else
-							ARRAY_FOREACH ( j, f.m_dValues )
-							{
-								if ( j )
-									tBuf.Appendf ( ","INT64_FMT, (int64_t)f.m_dValues[j] );
-								else
-									tBuf.Appendf ( INT64_FMT, (int64_t)f.m_dValues[j] );
-							}
-						tBuf += ")";
-					}
-					break;
-
-				case SPH_FILTER_RANGE:
-					if ( f.m_iMinValue==int64_t(INT64_MIN) || ( f.m_iMinValue==0 && f.m_sAttrName=="@id" ) )
-					{
-						// no min, thus (attr<maxval)
-						const char * sOps[2][2] = { { "<", "<=" }, { ">=", ">" } };
-						tBuf.Appendf ( " %s%s"INT64_FMT, f.m_sAttrName.cstr(),
-							sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_iMaxValue );
-					} else if ( f.m_iMaxValue==INT64_MAX || ( f.m_iMaxValue==-1 && f.m_sAttrName=="@id" ) )
-					{
-						// mo max, thus (attr>minval)
-						const char * sOps[2][2] = { { ">", ">=" }, { "<", "<=" } };
-						tBuf.Appendf ( " %s%s"INT64_FMT, f.m_sAttrName.cstr(),
-							sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_iMinValue );
-					} else
-					{
-						tBuf.Appendf ( " %s%s BETWEEN "INT64_FMT" AND "INT64_FMT,
-							f.m_sAttrName.cstr(), f.m_bExclude ? " NOT" : "",
-							f.m_iMinValue + !f.m_bHasEqual, f.m_iMaxValue - !f.m_bHasEqual );
-					}
-					break;
-
-				case SPH_FILTER_FLOATRANGE:
-					if ( f.m_fMinValue==-FLT_MAX )
-					{
-						// no min, thus (attr<maxval)
-						const char * sOps[2][2] = { { "<", "<=" }, { ">=", ">" } };
-						tBuf.Appendf ( " %s%s%f", f.m_sAttrName.cstr(),
-							sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_fMaxValue );
-					} else if ( f.m_fMaxValue==FLT_MAX )
-					{
-						// mo max, thus (attr>minval)
-						const char * sOps[2][2] = { { ">", ">=" }, { "<", "<=" } };
-						tBuf.Appendf ( " %s%s%f", f.m_sAttrName.cstr(),
-							sOps [ f.m_bExclude ][ f.m_bHasEqual ], f.m_fMinValue );
-					} else
-					{
-						// FIXME? need we handle m_bHasEqual here?
-						tBuf.Appendf ( " %s%s BETWEEN %f AND %f",
-							f.m_sAttrName.cstr(), f.m_bExclude ? " NOT" : "",
-							f.m_fMinValue, f.m_fMaxValue );
-					}
-					break;
-
-				case SPH_FILTER_USERVAR:
-				case SPH_FILTER_STRING:
-					tBuf.Appendf ( " %s%s'%s'", f.m_sAttrName.cstr(), ( f.m_bHasEqual ? "=" : "!=" ), f.m_sRefString.cstr() );
-					break;
-
-				case SPH_FILTER_NULL:
-					tBuf.Appendf ( " %s %s", f.m_sAttrName.cstr(), ( f.m_bHasEqual ? "IS NULL" : "IS NOT NULL" ) );
-					break;
-
-				default:
-					tBuf += " 1 /""* oops, unknown filter type *""/";
-					break;
-			}
-		}
-	}
-
-	// ORDER BY and/or GROUP BY clause
-	if ( q.m_sGroupBy.IsEmpty() )
-	{
-		if ( !q.m_sSortBy.IsEmpty() ) // case API SPH_MATCH_EXTENDED2 - SPH_SORT_RELEVANCE
-			FormatOrderBy ( &tBuf, " ORDER BY", q.m_eSort, q.m_sSortBy );
-	} else
-	{
-		tBuf.Appendf ( " GROUP BY %s", q.m_sGroupBy.cstr() );
-		FormatOrderBy ( &tBuf, "WITHIN GROUP ORDER BY", q.m_eSort, q.m_sSortBy );
-		if ( q.m_sGroupSortBy!="@group desc" )
-			FormatOrderBy ( &tBuf, "ORDER BY", SPH_SORT_EXTENDED, q.m_sGroupSortBy );
-	}
-
-	// LIMIT clause
-	if ( q.m_iOffset!=0 || q.m_iLimit!=20 )
-		tBuf.Appendf ( " LIMIT %d,%d", q.m_iOffset, q.m_iLimit );
-
-	// OPTION clause
-	int iOpts = 0;
-
-	if ( q.m_iMaxMatches!=1000 )
-	{
-		tBuf.Appendf ( iOpts++ ? ", " : " OPTION " );
-		tBuf.Appendf ( "max_matches=%d", q.m_iMaxMatches );
-	}
-
-	if ( !q.m_sComment.IsEmpty() )
-	{
-		tBuf.Appendf ( iOpts++ ? ", " : " OPTION " );
-		tBuf.Appendf ( "comment='%s'", q.m_sComment.cstr() ); // FIXME! escape, replace newlines..
-	}
-
-	if ( q.m_eRanker!=SPH_RANK_DEFAULT )
-	{
-		const char * sRanker = sphGetRankerName ( q.m_eRanker );
-		if ( !sRanker )
-			sRanker = sphGetRankerName ( SPH_RANK_DEFAULT );
-
-		tBuf.Appendf ( iOpts++ ? ", " : " OPTION " );
-		tBuf.Appendf ( "ranker=%s", sRanker );
-	}
-
-	// outer order by, limit
-	if ( q.m_bHasOuter )
-	{
-		tBuf += ")";
-		if ( !q.m_sOuterOrderBy.IsEmpty() )
-			tBuf.Appendf ( " ORDER BY %s", q.m_sOuterOrderBy.cstr() );
-		if ( q.m_iOuterOffset>0 )
-			tBuf.Appendf ( " LIMIT %d, %d", q.m_iOuterOffset, q.m_iOuterLimit );
-		else if ( q.m_iOuterLimit>0 )
-			tBuf.Appendf ( " LIMIT %d", q.m_iOuterLimit );
-	}
-
-	// finish SQL statement
-	tBuf += ";";
+    QuerySphinxqlStringExpr(q, tBuf);
 
 	///////////////
 	// query stats
@@ -7365,6 +7425,8 @@ static char g_sJsonNull[] = "{}";
 int CalcResultLength ( int iVer, const CSphQueryResult * pRes, const CSphTaggedVector & dTag2Pools, bool bAgentMode, const CSphQuery & tQuery, int iMasterVer )
 {
 	int iRespLen = 0;
+    if(tQuery.m_iQueryCacheResultSize)
+        return tQuery.m_iQueryCacheResultSize;  /// have cache --coreseek.
 
 	// query status
 	if ( iVer>=0x10D )
@@ -7625,6 +7687,27 @@ int CalcResultLength ( int iVer, const CSphQueryResult * pRes, const CSphTaggedV
 void SendResult ( int iVer, NetOutputBuffer_c & tOut, const CSphQueryResult * pRes,
 					const CSphTaggedVector & dTag2Pools, bool bAgentMode, const CSphQuery & tQuery, int iMasterVer )
 {
+    int buffer_begin = tOut.GetBufferWriteLength();
+    int buffer_end = 0;
+
+    if(!tQuery.m_sQueryHash.IsEmpty() && tQuery.m_iQueryCacheResultSize != 0 ) {
+        // Cache hit, read it from file & send.
+        CSphString sErrStr;
+        CSphAutofile rsFile ( tQuery.m_sQueryHash, SPH_O_READ, sErrStr );
+        CSphFixedVector<BYTE> dData ( tQuery.m_iQueryCacheResultSize );
+
+        size_t iRead = rsFile.Read ( dData.Begin(), tQuery.m_iQueryCacheResultSize, sErrStr );
+        if ( iRead != tQuery.m_iQueryCacheResultSize )
+        {
+            sErrStr.SetSprintf ( "read error in %s; "INT64_FMT" of %d bytes read",
+                                 tQuery.m_sQueryHash.cstr(), (int64_t)iRead, tQuery.m_iQueryCacheResultSize );
+        }
+        // send
+        tOut.SendBytes(dData.Begin(), dData.GetLength());
+        return;
+    }
+
+
 	// status
 	if ( iVer>=0x10D )
 	{
@@ -7978,6 +8061,28 @@ void SendResult ( int iVer, NetOutputBuffer_c & tOut, const CSphQueryResult * pR
 		if ( bAgentMode )
 			tOut.SendByte ( false ); // statistics have no expanded terms for now
 	}
+    // dump data
+    if(!tQuery.m_sQueryHash.IsEmpty() && tQuery.m_iQueryCacheResultSize == 0 ) {
+        // 不可以缓存 有 警告的结果; 不可以缓存 分布式索引的结果
+        bool bError = !pRes->m_sError.IsEmpty();
+        bool bWarning = !bError && !pRes->m_sWarning.IsEmpty();
+
+        // Note: 在早期 tOut 使用的固定内存, 但是 与 MySQL Client 不兼容,
+        // 后续, 改为了再分配. 此处内存可能会用冒.
+        buffer_end = tOut.GetBufferWriteLength();
+        // FIXME: do NOT save query without cache flag.
+        if(!bWarning && !bError) {
+            int iFD = ::open ( tQuery.m_sQueryHash.cstr(), O_CREAT | O_RDWR, S_IREAD | S_IWRITE );
+            if ( iFD<0 )
+            {
+                sphWarning ( "failed to write cache file '%s': %s", tQuery.m_sQueryHash.cstr(), strerror(errno) );
+            } else
+            {
+                sphWrite ( iFD, tOut.GetBufferDataPtr(buffer_begin), buffer_end -  buffer_begin );
+                ::close ( iFD );
+            }
+        } //
+    }
 }
 
 /////////////////////////////////////////////////////////////////////////////
@@ -10663,6 +10768,39 @@ void SearchHandler_c::RunSubset ( int iStart, int iEnd )
 	// FIXME! what if the remote agents finish early, could they timeout?
 	if ( m_dLocal.GetLength() )
 	{
+        CSphStringBuilder tBuf;
+        // origin here is a local for loop, but due to we cache query, no pre-index cache exist.
+        {
+            for ( int iQuery=m_iStart; iQuery<=m_iEnd; iQuery++ )
+            {
+                //char safeInfoBuf [ 1024 ];
+                char sFile [ SPH_MAX_FILENAME_LEN ];
+
+                //CSphString sError;
+                CSphQuery & tQuery = m_dQueries[iQuery];
+                QuerySphinxqlStringExpr(tQuery, tBuf);
+                //printf("idx:%s, query %s\n", sLocal, tBuf.cstr());
+                uint64_t uHash = sphFNV64 ( tBuf.cstr() );
+                //memset(safeInfoBuf, 0, sizeof(safeInfoBuf));
+                //sphSafeInfo ( safeInfoBuf, "%x.srs\0", uHash);
+                // check cache file exist...
+                tQuery.m_iQueryCacheResultSize = 0;
+
+                if(!g_sQueryCachePath.IsEmpty()) {
+                    memset(sFile, 0, sizeof(sFile));
+                    snprintf ( sFile, sizeof(sFile), "%s_%04llx.srs", g_sQueryCachePath.cstr(), uHash);
+                    tQuery.m_sQueryHash = sFile;
+                    if (sphIsReadable ( sFile )) {
+                        CSphString sErrStr;
+                        CSphAutofile rsFile ( tQuery.m_sQueryHash, SPH_O_READ, sErrStr );
+                        tQuery.m_iQueryCacheResultSize = rsFile.GetSize();
+                        //printf("cache file size: %d\n", tQuery.m_iQueryCacheResultSize);
+                    }
+                }
+                tBuf.Reset();
+            }
+        }
+
 		SetupLocalDF ( iStart, iEnd );
 
 		if ( m_pProfile )
@@ -22816,6 +22954,11 @@ int WINAPI ServiceMain ( int argc, char **argv )
 			g_sQueryLogFile = hSearchd["query_log"].cstr();
 		}
 	}
+
+    if ( hSearchd.Exists ( "ondisk_query_cache" ) )
+    {
+        g_sQueryCachePath = hSearchd["ondisk_query_cache"].cstr();
+    }
 
 	//////////////////////////////////////////////////
 	// shared stuff (perf counters, flushing) startup
