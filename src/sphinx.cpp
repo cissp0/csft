@@ -142,8 +142,12 @@
 #endif
 
 #if ( USE_WINDOWS && USE_MMSEG )
-    #pragma comment(linker, "/defaultlib:libcss.lib")
-    #pragma message("Automatically linking with libcss.lib")
+	#if _DEBUG
+		#pragma comment(linker, "/defaultlib:libcss_d.lib")
+	#else
+		#pragma comment(linker, "/defaultlib:libcss.lib")
+	#endif
+	#pragma message("Automatically linking with libcss.lib")
     #pragma warning(disable:4530) // for ugly mmseg
 #endif
 
