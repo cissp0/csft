@@ -19,11 +19,11 @@
 /////////////////////////////////////////////////////////////////////////////
 
 #ifdef _WIN32
-	#define USE_MYSQL		1	/// whether to compile MySQL support
+	#define USE_MYSQL		0	/// whether to compile MySQL support
 	#define USE_PGSQL		0	/// whether to compile PgSQL support
 	#define USE_ODBC		1	/// whether to compile ODBC support
 	#define USE_LIBEXPAT	1	/// whether to compile libexpat support
-	#define USE_LIBICONV	1	/// whether to compile iconv support
+	#define USE_LIBICONV	0	/// whether to compile iconv support
 	#define	USE_LIBSTEMMER	0	/// whether to compile libstemmber support
 	#define	USE_RE2			0	/// whether to compile RE2 support
 	#define USE_RLP			0	/// whether to compile RLP support
@@ -135,16 +135,13 @@ const int				ROWITEM_SHIFT	= 5;
 STATIC_ASSERT ( ( 1 << ROWITEM_SHIFT )==ROWITEM_BITS, INVALID_ROWITEM_SHIFT );
 
 #if defined(__APPLE__) && defined(__MACH__)
-
-#ifdef __LITTLE_ENDIAN__
-#	define USE_LITTLE_ENDIAN 1
-#else
-#	define USE_LITTLE_ENDIAN 0
+	#ifdef __LITTLE_ENDIAN__ 
+	#	define USE_LITTLE_ENDIAN 1
+	#else
+	#	define USE_LITTLE_ENDIAN 0
+	#endif
 #endif
 
-#endif
-
-#	define USE_LITTLE_ENDIAN 1
 
 #ifndef USE_LITTLE_ENDIAN
 #error Please define endianness

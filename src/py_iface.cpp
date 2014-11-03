@@ -5,6 +5,21 @@
 #include "py_csft.h"
 #include "py_source2.h"
 
+#if	_WIN32
+#pragma warning( push )
+#pragma warning( disable : 4127)
+#pragma warning( disable : 4189)
+#pragma warning( disable : 4273)
+#pragma warning( disable : 4100)
+#pragma warning( disable : 4800)
+#pragma warning( disable : 4510)
+#pragma warning( disable : 4702)
+#pragma warning( disable : 4706)
+#include "py_csft.cxx"
+
+#pragma warning( pop )
+#endif // _WIN32
+
 // get string
 #define LOC_GETS(_arg,_key) \
     if ( hSource.Exists(_key) ) \

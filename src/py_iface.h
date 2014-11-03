@@ -6,6 +6,11 @@
 #include "sphinx.h"
 #include "sphinxutils.h"
 
+#if	_WIN32
+#include "stdint.h"
+#include "inttypes.h"
+
+#endif // _WIN32
 /*
  * 在 C++ 和 Python 层 中间, 提供一个适配层
  * C++ Object member function                           Cython Side
