@@ -141,6 +141,7 @@
 	#pragma message("Automatically linking with btutils.lib")
 #endif
 
+
 /////////////////////////////////////////////////////////////////////////////
 
 // logf() is not there sometimes (eg. Solaris 9)
@@ -8293,7 +8294,7 @@ int CSphReader::GetLine ( char * sBuffer, int iMaxLen )
 
 /////////////////////////////////////////////////////////////////////////////
 
-#if PARANOID
+#if PARANOID  
 
 #define SPH_VARINT_DECODE(_type,_getexpr) \
 	register DWORD b = 0; \
