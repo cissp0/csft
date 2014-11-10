@@ -140,6 +140,12 @@ STATIC_ASSERT ( ( 1 << ROWITEM_SHIFT )==ROWITEM_BITS, INVALID_ROWITEM_SHIFT );
 	#else
 	#	define USE_LITTLE_ENDIAN 0
 	#endif
+#elif __GNUC__
+	#if __BYTE_ORDER__ == __ORDER_LITTLE_ENDIAN__
+	#	define USE_LITTLE_ENDIAN 1	
+	#else
+	#	define USE_LITTLE_ENDIAN 0
+	#endif
 #endif
 
 
