@@ -861,8 +861,12 @@ DONE:
 					{
 						PyObject* pItem = PyTuple_GetItem(pResult2, iField);
 						if(PyString_Check(pItem)){
-							//int j = this->m_tSchema.GetFieldIndex (PyString_AsString(pItem));
+							int j = this->m_tSchema.GetFieldIndex (PyString_AsString(pItem));
 							this->m_joinFields.Add(PyString_AsString(pItem));
+                                                        if(j!=-1) {
+								// update mindex
+								m_tSchema.m_dFields[j].m_iIndex = -1;
+							}
 						}
 					}
 				}//end PyTuple_Check
@@ -979,7 +983,7 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 			PyObject* pResult = NULL; 
 
 			//create hit_c
-			pArgs  = Py_BuildValue("(s)", tAttr.m_sName.cstr());
+			pArgs  = Py_BuildValue("(sO)", tAttr.m_sName.cstr(), Py_None);
 			pResult = PyEval_CallObject(m_pInstance_GetMVAValue, pArgs);    
 
 			if(PyErr_Occurred()) PyErr_Print();
@@ -1275,7 +1279,7 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 			m_tHits.m_dData.Resize( 0 );
 			iPrevHitPos = m_tHits.m_dData.GetLength(); 
 
-			pArgs  = Py_BuildValue("()");
+			pArgs  = Py_BuildValue("(O)", Py_None);
 
 			pResult = PyEval_CallObject(pFunc, pArgs);    
 			Py_XDECREF(pArgs);
@@ -1421,6 +1425,8 @@ DONE:
 	}
 	ARRAY_FOREACH ( i, m_tSchema.m_dFields ) {
 		// set m_dFields
+                if(m_tSchema.m_dFields[i].m_iIndex < 0 )
+                    continue; // -1 the join field.
 		char* ptr_Name = (char*)m_tSchema.m_dFields[i].m_sName.cstr();
 		PyObject* item = PyObject_GetAttrString(m_pInstance,ptr_Name);
 
@@ -1555,7 +1561,7 @@ ISphHits * CSphSource_Python::IterateJoinedHits ( CSphString & sError){
 
 				//create hit_c
 
-				pArgs  = Py_BuildValue("(s)", m_joinFields[m_iJoinedHitField].cstr());
+				pArgs  = Py_BuildValue("(sO)", m_joinFields[m_iJoinedHitField].cstr(), Py_None);
 				
 				//如果已经有值，则不继续处理
 
@@ -1697,6 +1703,7 @@ ISphHits * CSphSource_Python::IterateJoinedHits ( CSphString & sError){
 							m_tState.m_iStartField = m_iJoinedHitField;
 							m_tState.m_iEndField = m_iJoinedHitField+1;
 							m_tState.m_iStartPos = m_iJoinedHitPositions[iJoinedHitField];
+                                                        m_tState.m_dFields = m_dFields;
 						}
 
 						if(ptr)
