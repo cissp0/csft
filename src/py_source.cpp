@@ -861,9 +861,13 @@ DONE:
 					{
 						PyObject* pItem = PyTuple_GetItem(pResult2, iField);
 						if(PyString_Check(pItem)){
-							//int j = this->m_tSchema.GetFieldIndex (PyString_AsString(pItem));
+							int j = this->m_tSchema.GetFieldIndex (PyString_AsString(pItem));
 							this->m_joinFields.Add(PyString_AsString(pItem));
-						}
+							if(j!=-1) {
+								// update mindex
+								m_tSchema.m_dFields[j].m_iIndex = -1;
+							}
+						} // end string check
 					}
 				}//end PyTuple_Check
 				if(PyString_Check(pResult2)){
@@ -979,7 +983,7 @@ bool	CSphSource_Python::IterateMultivaluedNext ()
 			PyObject* pResult = NULL; 
 
 			//create hit_c
-			pArgs  = Py_BuildValue("(s)", tAttr.m_sName.cstr());
+			pArgs  = Py_BuildValue("(sO)", tAttr.m_sName.cstr(), Py_None);
 			pResult = PyEval_CallObject(m_pInstance_GetMVAValue, pArgs);    
 
 			if(PyErr_Occurred()) PyErr_Print();
@@ -1697,6 +1701,7 @@ ISphHits * CSphSource_Python::IterateJoinedHits ( CSphString & sError){
 							m_tState.m_iStartField = m_iJoinedHitField;
 							m_tState.m_iEndField = m_iJoinedHitField+1;
 							m_tState.m_iStartPos = m_iJoinedHitPositions[iJoinedHitField];
+							m_tState.m_dFields = m_dFields;
 						}
 
 						if(ptr)
