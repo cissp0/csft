@@ -1445,6 +1445,8 @@ DONE:
 	}
 	ARRAY_FOREACH ( i, m_tSchema.m_dFields ) {
 		// set m_dFields
+                if(m_tSchema.m_dFields[i].m_iIndex < 0 )
+                    continue; // -1 the join field.
 		char* ptr_Name = (char*)m_tSchema.m_dFields[i].m_sName.cstr();
 		PyObject* item = PyObject_GetAttrString(pDocInfo,ptr_Name);
 
