@@ -516,6 +516,14 @@ int CSphSource_Python::UpdatePySchema( PyObject * pList, CSphSchema * pInfo,  CS
 				// tCol.m_tLocator.m_iBitCount = iBitCount; //XXX: ????
 				pInfo->AddAttr ( tCol, true);
 			}else
+			if(strcmp(PyString_AsString(propValue) , "list64") == 0){
+				CSphColumnInfo tCol ( strkey, SPH_ATTR_INT64SET ); 
+				tCol.m_iIndex = i; //m_tSchema.GetAttrsCount (); //should be i in pList?
+				tCol.m_eAttrType = SPH_ATTR_INT64SET;
+				tCol.m_eSrc = SPH_ATTRSRC_FIELD;
+				// tCol.m_tLocator.m_iBitCount = iBitCount; //XXX: ????
+				pInfo->AddAttr ( tCol, true);
+			}else
 			if(strcmp(PyString_AsString(propValue) , "list-query") == 0){
 				CSphColumnInfo tCol ( strkey, SPH_ATTR_INTEGER );
 				tCol.m_iIndex = i; //m_tSchema.GetAttrsCount (); //should be i in pList?
@@ -536,6 +544,11 @@ int CSphSource_Python::UpdatePySchema( PyObject * pList, CSphSchema * pInfo,  CS
 			}else
 			if(strcmp(PyString_AsString(propValue) , "string") == 0){
 				CSphColumnInfo tCol ( strkey, SPH_ATTR_STRING );
+				tCol.m_iIndex = i; //m_tSchema.GetAttrsCount (); //should be i in pList?
+				pInfo->AddAttr ( tCol , true);
+			}else
+			if(strcmp(PyString_AsString(propValue) , "json") == 0){
+				CSphColumnInfo tCol ( strkey, SPH_ATTR_JSON );
 				tCol.m_iIndex = i; //m_tSchema.GetAttrsCount (); //should be i in pList?
 				pInfo->AddAttr ( tCol , true);
 			}else
@@ -863,11 +876,11 @@ DONE:
 						if(PyString_Check(pItem)){
 							int j = this->m_tSchema.GetFieldIndex (PyString_AsString(pItem));
 							this->m_joinFields.Add(PyString_AsString(pItem));
-                                                        if(j!=-1) {
+							if(j!=-1) {
 								// update mindex
 								m_tSchema.m_dFields[j].m_iIndex = -1;
 							}
-						}
+						} // end string check
 					}
 				}//end PyTuple_Check
 				if(PyString_Check(pResult2)){
@@ -909,7 +922,7 @@ DONE:
 	for ( int i = 0; i < m_tSchema.GetAttrsCount (); i++ )
 	{
 		const CSphColumnInfo & tCol = m_tSchema.GetAttr ( i );
-		if ( ( tCol.m_eAttrType == SPH_ATTR_UINT32SET ) && tCol.m_eSrc == SPH_ATTRSRC_FIELD )
+		if ( ( tCol.m_eAttrType == SPH_ATTR_UINT32SET || tCol.m_eAttrType == SPH_ATTR_INT64SET ) && tCol.m_eSrc == SPH_ATTRSRC_FIELD )
 			m_dAttrToFieldMVA.Add ( iFieldMVA++ );
 		else
 			m_dAttrToFieldMVA.Add ( -1 );
@@ -1261,6 +1274,8 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 		}
 	}
 
+	PyObject* pDocInfo = m_pInstance;
+
 	if(!m_pInstance_NextDocument)
 		return NULL;
 
@@ -1279,7 +1294,7 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 			m_tHits.m_dData.Resize( 0 );
 			iPrevHitPos = m_tHits.m_dData.GetLength(); 
 
-			pArgs  = Py_BuildValue("(O)", Py_None);
+			pArgs  = Py_BuildValue("(O)", PyNone);
 
 			pResult = PyEval_CallObject(pFunc, pArgs);    
 			Py_XDECREF(pArgs);
@@ -1299,12 +1314,17 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 				goto CHECK_TO_CALL_AFTER_INDEX;
 				//return NULL; //if return false , the source finished
 			} 
-			Py_XDECREF(pResult);
+			// check result is True | document object
+			if(PyBool_Check(pResult) && pResult == Py_True){
+				Py_XDECREF(pResult);
+			} else {
+				pDocInfo = pResult;
+			}
 			//We do NOT care about doc_id, but doc_id must be > 0
 		}
 	}
 	{
-		PyObject* pDocId = GetObjectAttr(m_pInstance, (char*)m_Doc_id_col.cstr());
+		PyObject* pDocId = GetObjectAttr(pDocInfo, (char*)m_Doc_id_col.cstr());
 
 		if(pDocId && PyLong_Check(pDocId)) {
 #if USE_64BIT
@@ -1358,16 +1378,16 @@ DONE:
 	int iFieldMVA = 0;
 	for ( int i=0; i<m_tSchema.GetAttrsCount(); i++ ) {
 		const CSphColumnInfo & tAttr = m_tSchema.GetAttr(i); // shortcut
-		if ( tAttr.m_eAttrType == SPH_ATTR_UINT32SET )
+		if ( tAttr.m_eAttrType == SPH_ATTR_UINT32SET || tAttr.m_eAttrType == SPH_ATTR_INT64SET)
 		{
 			m_tDocInfo.SetAttr ( tAttr.m_tLocator,0);
 			if ( tAttr.m_eSrc == SPH_ATTRSRC_FIELD ) {
 				//all the MVA fields in this data source is SPH_ATTRSRC_FIELD
 				//deal the python-list
 #if USE_PYTHON_CASE_SENSIVE_ATTR
-				PyObject* pList = PyObject_GetAttrString(m_pInstance, (char*)tAttr.m_sNameExactly.cstr());
+				PyObject* pList = PyObject_GetAttrString(pDocInfo, (char*)tAttr.m_sNameExactly.cstr());
 #else
-				PyObject* pList = PyObject_GetAttrString(m_pInstance, (char*)tAttr.m_sName.cstr());
+				PyObject* pList = PyObject_GetAttrString(pDocInfo, (char*)tAttr.m_sName.cstr());
 #endif
 				if(PyErr_Occurred()) PyErr_Print();
 				PyErr_Clear();
@@ -1413,9 +1433,9 @@ DONE:
 		}
 		//deal other attributes
 #if USE_PYTHON_CASE_SENSIVE_ATTR
-		PyObject* item = PyObject_GetAttrString(m_pInstance, (char*)tAttr.m_sNameExactly.cstr()); //+1
+		PyObject* item = PyObject_GetAttrString(pDocInfo, (char*)tAttr.m_sNameExactly.cstr()); //+1
 #else
-		PyObject* item = PyObject_GetAttrString(m_pInstance, (char*)tAttr.m_sName.cstr()); //+1
+		PyObject* item = PyObject_GetAttrString(pDocInfo, (char*)tAttr.m_sName.cstr()); //+1
 #endif
 		if(PyErr_Occurred()) PyErr_Print();
 		PyErr_Clear();
@@ -1428,7 +1448,7 @@ DONE:
                 if(m_tSchema.m_dFields[i].m_iIndex < 0 )
                     continue; // -1 the join field.
 		char* ptr_Name = (char*)m_tSchema.m_dFields[i].m_sName.cstr();
-		PyObject* item = PyObject_GetAttrString(m_pInstance,ptr_Name);
+		PyObject* item = PyObject_GetAttrString(pDocInfo,ptr_Name);
 
 		if(PyErr_Occurred()) {
 			PyErr_Print();
@@ -1482,6 +1502,10 @@ DONE:
 		//printf("set field %s @ %d \n", ptr_Name, i);
 		m_dFields[i] = ptr;
 	} // end for each fields.
+	
+	// release
+	if(pDocInfo != m_pInstance)
+		Py_XDECREF(pResult);
 
 	return m_dFields;
 }
@@ -1703,7 +1727,7 @@ ISphHits * CSphSource_Python::IterateJoinedHits ( CSphString & sError){
 							m_tState.m_iStartField = m_iJoinedHitField;
 							m_tState.m_iEndField = m_iJoinedHitField+1;
 							m_tState.m_iStartPos = m_iJoinedHitPositions[iJoinedHitField];
-                                                        m_tState.m_dFields = m_dFields;
+							m_tState.m_dFields = m_dFields;
 						}
 
 						if(ptr)
@@ -1886,6 +1910,7 @@ int CSphSource_Python::SetAttr( int iIndex, PyObject* v)
 								 }
 		break;
 		case SPH_ATTR_STRING:
+		case SPH_ATTR_JSON:
 		{
 			//check as string?
 			if(item && Py_None!=item && PyString_Check(item)) {
