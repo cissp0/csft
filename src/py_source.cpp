@@ -606,16 +606,16 @@ int CSphSource_Python::InitDataSchema_Python( CSphString & sError )
 	//enum all attrs
 	PyObject* pArgs = NULL;
     PyObject* pResult = NULL; 
-    PyObject* pFunc = PyObject_GetAttrString(m_pInstance, "GetScheme"); // +1
+    PyObject* pFunc = PyObject_GetAttrString(m_pInstance, "GetSchema"); // +1
 	if (!pFunc) {
-		sError = ("Method SourceObj->GetScheme():{dict of attributes} missing.");
+		sError = ("Method SourceObj->GetSchema():{dict of attributes} missing.");
 		//fprintf(stderr,m_sError.cstr());
 		return -2; //Next Document must exist
 	}
 
     if(!pFunc||!PyCallable_Check(pFunc)){
         Py_XDECREF(pFunc);
-		sError = ("Method SourceObj->GetScheme():{dict of attributes} missing.");
+		sError = ("Method SourceObj->GetSchema():{dict of attributes} missing.");
 		//fprintf(stderr,m_sError.cstr());
         return -2;
     }
@@ -1294,7 +1294,7 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 			m_tHits.m_dData.Resize( 0 );
 			iPrevHitPos = m_tHits.m_dData.GetLength(); 
 
-			pArgs  = Py_BuildValue("(O)", PyNone);
+			pArgs  = Py_BuildValue("(O)", Py_None);
 
 			pResult = PyEval_CallObject(pFunc, pArgs);    
 			Py_XDECREF(pArgs);
@@ -1505,7 +1505,7 @@ DONE:
 	
 	// release
 	if(pDocInfo != m_pInstance)
-		Py_XDECREF(pResult);
+		Py_XDECREF(pDocInfo);
 
 	return m_dFields;
 }
