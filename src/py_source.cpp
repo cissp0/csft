@@ -1308,7 +1308,7 @@ BYTE **	CSphSource_Python::NextDocument ( CSphString & sError ){
 				goto CHECK_TO_CALL_AFTER_INDEX;
 			}
 
-			if(!CheckResult(pResult)) {
+			if(PyBool_Check(pResult) && pResult == Py_False){
 				Py_XDECREF(pResult);
 				m_tDocInfo.m_uDocID = 0;
 				goto CHECK_TO_CALL_AFTER_INDEX;

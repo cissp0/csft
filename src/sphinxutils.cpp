@@ -406,7 +406,7 @@ static KeyDesc_t g_dKeysIndex[] =
 	{ "wordforms",				KEY_LIST, NULL },
 	{ "embedded_limit",			0, NULL },
 	{ "min_word_len",			0, NULL },
-	{ "charset_type",			KEY_REMOVED, NULL },
+	{ "charset_type",			0, NULL }, //coreseek remove charset_type warning..
 	{ "charset_table",			0, NULL },
     { "charset_dictpath",		0, NULL }, //coreseek: mmseg's dictionary path
     { "charset_debug",			0, NULL }, //coreseek: debug output tokens
@@ -714,7 +714,7 @@ bool CSphConfigParser::ValidateKey ( const char * sKey )
 				sKey, m_sFileName.cstr(), m_iLine, pDesc->m_sExtra );
 
 	// warn about list/non-list keys
-	if (!( pDesc->m_iFlags & KEY_LIST ))
+	if ( !bNoCheck && !( pDesc->m_iFlags & KEY_LIST ))
 	{
 		CSphConfigSection & tSec = m_tConf[m_sSectionType][m_sSectionName];
 		if ( tSec(sKey) && !tSec[sKey].m_bTag )
