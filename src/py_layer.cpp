@@ -67,7 +67,7 @@ def __coreseek_set_python_path(sPath):\n\
 	// helper function to find data source
 	nRet = PyRun_SimpleString("\n\
 def __coreseek_find_pysource(sName): \n\
-    pos = sName.find('.') \n\
+    pos = sName.rfind('.') \n\
     module_name = sName[:pos]\n\
     try:\n\
         exec ('%s=__import__(\"%s\")' % (module_name, module_name))\n\
