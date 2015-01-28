@@ -14,7 +14,7 @@ AM_MAINTAINER_MODE
 AM_PATH_PYTHON
 AC_CONFIG_SRCDIR([src/searchd.cpp])
 AC_CONFIG_HEADER([config/config.h])
-AM_PROG_AR
+#AM_PROG_AR
 
 # hack to locate expat/iconv in /usr/local on BSD systems
 CPPFLAGS="$CPPFLAGS -I/usr/local/include"
@@ -58,7 +58,7 @@ fi
 
 AC_PROG_CC
 AC_PROG_CXX
-AM_PROG_AR
+AM_PROG_CC_C_O
 AC_PROG_RANLIB
 
 dnl Checks for embedded interpretors.
