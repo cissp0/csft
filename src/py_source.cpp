@@ -1890,7 +1890,13 @@ int CSphSource_Python::SetAttr( int iIndex, PyObject* v)
 							   }
 		break;
 		case SPH_ATTR_BOOL: {
-			long dVal =  (item == Py_True)?1:0;
+			PY_LONG_LONG dVal =  0;
+			if(item && PyBool_Check(item)) 
+				dVal =  (item == Py_True)?1:0;
+
+			if(item && PyInt_Check(item)) 
+				dVal =  PyInt_AsLong(item);
+
 			m_tDocInfo.SetAttr ( tAttr.m_tLocator,(DWORD)dVal);
 			Py_XDECREF(item);
 							}
