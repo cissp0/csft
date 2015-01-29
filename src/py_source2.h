@@ -2,6 +2,7 @@
 #define PYSOURCE_H
 
 #include "sphinx.h"
+#include "sphinxutils.h"
 #include "py_layer.h"
 #include "py_iface.h"
 
