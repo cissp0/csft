@@ -2659,8 +2659,9 @@ protected:
         int nRet = 0;
         if(!m_mgr) {
             m_mgr = SegmenterManagerSingleInstance::Get();
+			sphInfo("[DEBUG][coreseek], tokenizer reload");
             if(dict_path)
-                nRet = m_mgr->init(dict_path);
+				nRet = m_mgr->init(dict_path, css::SegmenterManager::SEG_METHOD_NGRAM, true);
         }
         if(nRet == 0 && !m_seg)
             m_seg = m_mgr->getSegmenter(false);
